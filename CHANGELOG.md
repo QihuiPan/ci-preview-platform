@@ -19,6 +19,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Directed Go and XDG caches into the writable per-attempt temporary volume so the documented Go job works with a read-only root filesystem.
 - Corrected the example repository's immutable commit SHA against both Git and the GitHub API, and added an early fixture-availability check before cluster image builds.
 - Added the patched object-store image input to the optional Terraform wrapper and documented explicit cluster authentication and ownership constraints.
 - Required the updated preview replica to finish rolling out before marking a new image active; added stale-generation and mixed-revision readiness regression tests.

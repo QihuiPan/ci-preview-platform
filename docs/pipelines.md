@@ -18,6 +18,8 @@ Commands are argv arrays, not implicitly evaluated shell strings. Explicitly use
 
 Write artifacts beneath `/workspace/artifacts`. The worker collects regular files after the job exits; symlinks and special files are rejected. The archive limit is 16 MiB and 2048 files; logs are limited to 1 MiB. Artifacts are available through the API only after completion. Live log streaming is not implemented.
 
+HOME, XDG_CACHE_HOME, GOPATH, GOCACHE, and GOMODCACHE point into the writable /tmp volume. These caches are attempt-local and are not reused across jobs. The temporary volume is limited to 1 GiB; the workspace is limited to 10 GiB. Configure other language tools to write beneath those volumes instead of their image's read-only system paths.
+
 Limits: at most 32 jobs, 1-8 CPUs and 64-16384 MiB per job, 10-3600 seconds, 1-5 lease attempts, priority -10 to 10. The queue admits at most 1000 nonterminal jobs. The default tenant budget is two running jobs, 16 CPUs, and 32768 MiB. A nonzero command exit fails the pipeline; expired infrastructure leases retry up to the job budget. Cancelling or failing one branch cancels remaining nonterminal branches.
 
 The `trusted` field is not an authorization mechanism. The API overwrites it using the operator repository policy. Fork jobs are always untrusted and cannot publish images.

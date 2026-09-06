@@ -24,6 +24,11 @@ func TestUntrustedPodHasNoManagementCredentials(t *testing.T) {
 	if !strings.Contains(string(raw), `"readOnlyRootFilesystem":true`) {
 		t.Fatal("root filesystem is writable")
 	}
+	for _, required := range []string{"GOPATH", "GOCACHE", "GOMODCACHE", "XDG_CACHE_HOME"} {
+		if !strings.Contains(string(raw), required) {
+			t.Fatal("missing writable language cache setting", required)
+		}
+	}
 	if !strings.Contains(string(raw), "safe.directory /workspace") || strings.Contains(string(raw), "safe.directory *") {
 		t.Fatal("checkout must trust only its group-writable workspace mount")
 	}
