@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: preview-example-184
+  labels:
+    ci.preview/repository: example
+    ci.preview/pull-request: "184"
+    ci.preview/generation: "1"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: preview-budget
+  namespace: preview-example-184
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    pods: "10"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: preview-example-184
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]

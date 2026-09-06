@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ci-preview-platform
+description: Lease-based CI control plane and preview reconciler
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

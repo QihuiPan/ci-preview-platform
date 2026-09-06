@@ -1,0 +1,33 @@
+services:
+  api:
+    build:
+      context: .
+      args:
+        COMMAND: api
+    environment:
+      GITHUB_WEBHOOK_SECRET: local-development-secret
+      LISTEN_ADDR: :8080
+      LEASE_TTL: 15s
+      WORKER_TTL: 30s
+      DEFAULT_TENANT_LIMIT: "2"
+      PREVIEW_BASE_DOMAIN: preview.local
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      args:
+        COMMAND: worker
+    command:
+      - -api=http://api:8080
+      - -id=worker-compose-1
+      - -pool=trusted
+      - -capabilities=linux-amd64,buildkit-rootless
+      - -capacity=4
+      - -trusted=true
+      - -job-duration=2s
+    depends_on:
+      - api
+    restart: unless-stopped

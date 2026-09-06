@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "jobs": {
+    "test": {
+      "image": "golang:1.26.5",
+      "command": ["go", "test", "./..."],
+      "capabilities": ["linux-amd64"],
+      "resources": {"cpu": 1, "memory_mb": 1024}
+    },
+    "image": {
+      "image": "moby/buildkit:rootless",
+      "command": ["buildctl-daemonless.sh", "build"],
+      "needs": ["test"],
+      "capabilities": ["linux-amd64", "buildkit-rootless"],
+      "resources": {"cpu": 2, "memory_mb": 2048}
+    },
+    "preview": {
+      "image": "alpine:3",
+      "command": ["true"],
+      "needs": ["image"],
+      "capabilities": ["linux-amd64"],
+      "resources": {"cpu": 1, "memory_mb": 128},
+      "environment": {"ttl_minutes": 1440, "exposure": "public"}
+    }
+  }
+}
