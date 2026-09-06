@@ -3,7 +3,9 @@ set -euo pipefail
 # Run only against a disposable cluster named ci-preview-test.
 test "$(kubectl config current-context)" = "kind-ci-preview-test"
 docker build -t ci-preview-platform:e2e .
+docker build -f Dockerfile.minio -t ci-preview-minio:2025-10-15 .
 kind load docker-image ci-preview-platform:e2e --name ci-preview-test
+kind load docker-image ci-preview-minio:2025-10-15 --name ci-preview-test
 kubectl create namespace ci-platform
 kubectl label namespace ci-platform ci-preview/ingress=true
 go run ./cmd/cictl init | kubectl apply -f -

@@ -146,7 +146,7 @@ func run() error {
 		runner.GitImage = "alpine/git:2.49.1"
 	}
 	if runner.BuildkitImage == "" {
-		runner.BuildkitImage = "moby/buildkit:v0.23.2-rootless"
+		runner.BuildkitImage = "moby/buildkit:v0.33.0-rootless"
 	}
 	if path := os.Getenv("REGISTRY_CONFIG_FILE"); path != "" {
 		b, err := os.ReadFile(path)

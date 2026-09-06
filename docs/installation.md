@@ -6,7 +6,7 @@ Use a dedicated Linux Kubernetes 1.34-1.35 cluster. Calico or another CNI must a
 
 The API has no cluster credentials. The worker and controller are trusted management services with cluster-wide namespace and workload permissions. Kubernetes RBAC cannot restrict namespace creation to a prefix. Do not install these management roles into a cluster containing unrelated sensitive workloads.
 
-The chart starts PostgreSQL and MinIO with persistent volumes; these single-instance dependencies are not highly available. They are for a small-team installation. See operations before expanding service availability commitments.
+The chart starts PostgreSQL and MinIO with persistent volumes; these single-instance dependencies are not highly available. Build the separate MinIO image with Dockerfile.minio as shown in the README: the security-fixed upstream release is source-only, so the chart intentionally does not default to an older vulnerable community image. See operations before expanding service availability commitments.
 
 ## Disposable kind installation
 

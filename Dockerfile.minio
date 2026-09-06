@@ -1,0 +1,18 @@
+# MinIO stopped publishing the security-fixed release as a prebuilt community image.
+# Build the reviewed upstream source revision instead of shipping the older vulnerable image.
+FROM golang:1.26.8 AS build
+WORKDIR /src
+RUN git clone --depth 1 --branch RELEASE.2025-10-15T17-29-55Z https://github.com/minio/minio.git . && \
+    test "$(git rev-parse HEAD)" = "9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a"
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/minio .
+
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates
+COPY --from=build /out/minio /usr/local/bin/minio
+COPY --from=build /src/LICENSE /licenses/MinIO-AGPL-3.0.txt
+LABEL org.opencontainers.image.source="https://github.com/minio/minio" \
+      org.opencontainers.image.revision="9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+USER 1000:1000
+EXPOSE 9000
+ENTRYPOINT ["/usr/local/bin/minio"]

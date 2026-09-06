@@ -25,6 +25,9 @@ import (
 
 func main() {
 	if e := run(); e != nil {
+		if errors.Is(e, flag.ErrHelp) {
+			return
+		}
 		fmt.Fprintln(os.Stderr, e)
 		os.Exit(1)
 	}
@@ -59,6 +62,16 @@ func initialize(args []string) error {
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{"apiVersion": "v1", "kind": "Secret", "metadata": map[string]string{"name": "ci-secrets", "namespace": *namespace}, "type": "Opaque", "data": data})
 }
 func run() error {
+	for _, arg := range os.Args[1:] {
+		if arg == "--help" || arg == "-h" || arg == "help" {
+			fmt.Println("cictl 0.2.0\nUsage: cictl init|submit|pipelines|show|cancel|previews|logs|artifact|version\nSubmit: --file CONFIG --repo OWNER/REPO --sha FULL_SHA [--pr NUMBER] [--key ID]\nRead: show PIPELINE_ID, logs ATTEMPT_ID, artifact ATTEMPT_ID NAME\nConfigure API_URL and API_TOKEN or API_TOKEN_FILE for API commands.\nInit prints a new Kubernetes Secret; pipe it directly to kubectl create -f - once.")
+			return nil
+		}
+	}
+	if len(os.Args) == 2 && os.Args[1] == "version" {
+		fmt.Println("0.2.0")
+		return nil
+	}
 	if len(os.Args) < 2 {
 		return errors.New("usage: cictl init|submit|pipelines|show|cancel|previews|logs|artifact")
 	}

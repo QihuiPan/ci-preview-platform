@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Enforced changelog updates for ordinary change commits in CI.
+- Added standalone CLI help and version commands for first-time users.
 - Added signed GitHub App delivery integration, object-store signing, authentication, and transactional test-adapter regression coverage; cluster acceptance now also probes Kubernetes API egress isolation.
 - Added complete installation, pipeline, GitHub App, API, security, backup, upgrade, and recovery documentation with a runnable public-repository example.
 - Added manifest and artifact-boundary regression tests and control-plane ingress isolation.
@@ -14,6 +16,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Replaced the vulnerable prebuilt MinIO server default with a reproducible build of the upstream security-fixed source revision, and refreshed the BuildKit, kubectl, and MinIO client versions.
 - Fixed clean-cluster installation by explicitly loading projected ServiceAccount credentials and importing a declarative MinIO lifecycle configuration instead of unsupported CLI flags.
 - Updated the Go toolchain to 1.26.8 and the text dependency to its security-patched version; added a reachable-vulnerability CI gate.
 - Restricted the trusted rootless builder's setuid-helper exception to SETUID/SETGID, leaving ordinary and fork job profiles unchanged.

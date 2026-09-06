@@ -27,6 +27,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Require a changelog entry for the change commit
+        shell: bash
+        run: |
+          if test "$(git log -1 --format=%P | wc -w)" -lt 2; then
+            git diff-tree --no-commit-id --name-only -r --root HEAD | grep -qx CHANGELOG.md
+          fi
 
       - name: Set up Go
         uses: actions/setup-go@v7

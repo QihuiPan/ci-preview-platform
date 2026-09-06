@@ -27,12 +27,15 @@ cd ci-preview-platform
 go build -o bin/cictl ./cmd/cictl
 docker build -t YOUR_REGISTRY/ci-preview-platform:0.2.0 .
 docker push YOUR_REGISTRY/ci-preview-platform:0.2.0
+docker build -f Dockerfile.minio -t YOUR_REGISTRY/ci-preview-minio:2025-10-15 .
+docker push YOUR_REGISTRY/ci-preview-minio:2025-10-15
 
 kubectl create namespace ci-platform
 # Run once only. This generates random secrets; never regenerate the state key on upgrade.
 bin/cictl init --repo octocat/Hello-World | kubectl create -f -
 helm upgrade --install ci deploy/helm/ci-preview-platform \
   --namespace ci-platform --set image=YOUR_REGISTRY/ci-preview-platform:0.2.0 \
+  --set minio.image=YOUR_REGISTRY/ci-preview-minio:2025-10-15 \
   --wait --wait-for-jobs --timeout 10m
 kubectl port-forward -n ci-platform service/ci-api 8080:8080
 ```
@@ -65,3 +68,5 @@ Use the returned pipeline ID with `cictl show ID`; use an attempt ID with `cictl
 This is a small-team self-hosted release, not an audited hostile-multi-tenant SaaS or an implementation of every stretch goal in the original blueprint. In particular, automatic worker autoscaling, weighted tenant scheduling, Argo CD/GitOps delivery, artifact signing, and a browser dashboard are not included. Read the explicit [limits and deployment assumptions](docs/known-limitations.md) before running untrusted submissions.
 
 All source comments, examples, documentation, and change entries are in English. Every change commit must update `CHANGELOG.md`.
+
+The platform source is MIT-licensed. MinIO is a separate AGPL-3.0-or-later component; its image includes the upstream license and the Dockerfile pins the corresponding public source revision.
