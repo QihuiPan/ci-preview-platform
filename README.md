@@ -9,6 +9,7 @@ The 0.2 runtime replaces the original simulator. PostgreSQL persists scheduling 
 
 ## Start here
 
+- [Download the 0.2.0 release](https://github.com/QihuiPan/ci-preview-platform/releases/tag/v0.2.0): CLI binaries, Helm chart, source, setup notes, and checksums.
 - [Installation and first successful job](docs/installation.md)
 - [Repository pipeline configuration](docs/pipelines.md)
 - [GitHub App setup](docs/github-app.md)
@@ -17,7 +18,7 @@ The 0.2 runtime replaces the original simulator. PostgreSQL persists scheduling 
 - [Security boundaries](docs/threat-model.md) and [supported scope](docs/known-limitations.md)
 - [Verification results](docs/test-report.md) and [changelog](CHANGELOG.md)
 
-You need a dedicated Linux Kubernetes cluster with an enforcing NetworkPolicy CNI, persistent storage, Go 1.26.8, Docker, kubectl, and Helm 3.18+. The control plane is not a hosted service: you supply your cluster, image registry, and optional public DNS/TLS. No cloud account or paid service is created by the installer.
+You need a dedicated Linux Kubernetes cluster with an enforcing NetworkPolicy CNI, persistent storage, Docker, kubectl, and Helm 3.18+. Go 1.26.8 is needed when building the CLI from source or running the acceptance script; prebuilt CLI users do not need a local Go installation. The control plane is not a hosted service: you supply your cluster, image registry, and optional public DNS/TLS. No cloud account or paid service is created by the installer.
 
 For a disposable local demonstration, use the kind instructions in the installation guide. For an existing suitable cluster:
 

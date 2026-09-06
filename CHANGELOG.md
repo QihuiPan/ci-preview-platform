@@ -2,10 +2,11 @@
 
 All notable changes to this project are documented in this file. The format follows Keep a Changelog, and releases use Semantic Versioning.
 
-## Unreleased
+## 0.2.0 - 2026-09-06
 
 ### Added
 
+- Published cross-platform CLI binaries, a packaged Helm chart, source archive, setup notes, checksums, and an evidence-backed release verification report.
 - Strengthened cluster acceptance to require the exact failing command exit code and confirm a running cancelled container's namespace is actually removed.
 - Added binary-safe CLI artifact downloads with overwrite protection and a cross-platform regression test.
 - Added explicit same-revision reruns while preserving per-request replay safety.
@@ -15,7 +16,7 @@ All notable changes to this project are documented in this file. The format foll
 - Added complete installation, pipeline, GitHub App, API, security, backup, upgrade, and recovery documentation with a runnable public-repository example.
 - Added manifest and artifact-boundary regression tests and control-plane ingress isolation.
 - Added encrypted PostgreSQL transactions, repository-scoped bearer authentication, immutable YAML plans, GitHub App integration, actual Kubernetes execution, rootless image builds, S3 artifacts, and readiness-driven preview reconciliation.
-- Added the tenant CLI, self-contained Helm installation, and real PostgreSQL and kind acceptance suites. This development candidate is not release-verified yet.
+- Added the tenant CLI, self-contained Helm installation, and real PostgreSQL and kind acceptance suites. The complete clean-cluster lifecycle passed before release.
 
 ### Fixed
 
@@ -41,7 +42,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Changed
 
-- Recorded the successful Linux race, build, Compose validation, and container build release gate for version 0.1.0.
+- Recorded successful race, database, vulnerability, container, and full cluster lifecycle gates for the actual runtime, with explicit external-integration limitations.
 
 ## 0.1.0 - 2026-09-06
 
