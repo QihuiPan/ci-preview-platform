@@ -1,0 +1,41 @@
+name: Cluster acceptance
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26.5
+      - name: Install pinned cluster tools
+        run: |
+          curl -fsSL --retry 3 https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64 -o /usr/local/bin/kind
+          chmod +x /usr/local/bin/kind
+          curl -fsSL --retry 3 https://get.helm.sh/helm-v3.18.6-linux-amd64.tar.gz | tar -xz
+          sudo install linux-amd64/helm /usr/local/bin/helm
+      - name: Create isolated test cluster
+        run: |
+          kind create cluster --name ci-preview-test --image kindest/node:v1.34.0 --config deploy/kind.yaml
+          kubectl apply --server-side -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.2/manifests/calico.yaml
+          kubectl wait --for=condition=Ready nodes --all --timeout=300s
+          kubectl rollout status daemonset/calico-node -n kube-system --timeout=300s
+      - name: Exercise actual execution and preview lifecycle
+        run: bash scripts/cluster-test.sh
+      - name: Collect safe failure diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -100 || true
+          for app in ci-api ci-controller ci-worker-untrusted; do
+            kubectl logs -n ci-platform deployment/$app --tail=150 || true
+          done
+      - name: Remove disposable cluster
+        if: always()
+        run: kind delete cluster --name ci-preview-test

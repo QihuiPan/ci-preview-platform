@@ -1,0 +1,14 @@
+.git
+.env
+.terraform
+secrets
+work
+outputs
+data
+bin
+dist
+coverage
+*.pem
+*.key
+*.out
+*.log

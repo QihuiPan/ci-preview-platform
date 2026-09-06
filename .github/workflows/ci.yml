@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -12,6 +11,19 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: integration-only
+          POSTGRES_DB: ci_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://ci:integration-only@localhost:5432/ci_test?sslmode=disable
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -39,4 +51,4 @@ jobs:
         run: docker compose config --quiet
 
       - name: Build control-plane container
-        run: docker build --build-arg COMMAND=api --tag ci-preview-platform:test .
+        run: docker build --tag ci-preview-platform:test .

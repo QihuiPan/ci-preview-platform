@@ -12,7 +12,7 @@ import (
 func TestHundredConcurrentJobsRemainFair(t *testing.T) {
 	now := time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC)
 	store := control.New(control.Config{
-		LeaseTTL: time.Minute, WorkerTTL: time.Minute, DefaultTenantLimit: 100,
+		LeaseTTL: time.Minute, WorkerTTL: time.Minute, DefaultTenantLimit: 100, TenantCPU: 100,
 	})
 	_, err := store.RegisterWorker(domain.Worker{
 		ID: "load-worker", Pool: "load", Capacity: 100,

@@ -2,6 +2,7 @@ package control
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/QihuiPan/ci-preview-platform/internal/domain"
 	"github.com/QihuiPan/ci-preview-platform/internal/planner"
@@ -20,6 +20,7 @@ var (
 	ErrConflict   = errors.New("state conflict")
 	ErrNoWork     = errors.New("no schedulable work")
 	ErrStaleLease = errors.New("lease is stale or no longer current")
+	ErrCapacity   = errors.New("admission capacity exceeded")
 )
 
 // Config controls scheduler, lease, and preview reconciliation behavior.
@@ -29,6 +30,10 @@ type Config struct {
 	DefaultTenantLimit int
 	PreviewBaseDomain  string
 	PreviewDeleteDelay time.Duration
+	MaxQueuedJobs      int
+	TenantCPU          int
+	TenantMemoryMB     int
+	Retention          time.Duration
 }
 
 // Metrics is a monotonic snapshot suitable for the Prometheus endpoint.
@@ -45,23 +50,23 @@ type Metrics struct {
 	PreviewsDeleted  uint64
 }
 
-// Store is a concurrency-safe reference control plane.
-//
-// The in-memory adapter keeps the correctness rules executable in local demos.
-// The SQL schema in migrations documents the production PostgreSQL boundary.
+// Store implements deterministic transitions inside the durable repository transaction.
 type Store struct {
 	mu sync.RWMutex
 
-	config       Config
-	pipelines    map[string]*domain.Pipeline
-	jobs         map[string]*domain.Job
-	attempts     map[string]*domain.Attempt
-	workers      map[string]*domain.Worker
-	previews     map[string]*domain.Preview
-	deliveries   map[string]string
-	tenantLimits map[string]int
-	lastTenant   string
-	metrics      Metrics
+	config        Config
+	pipelines     map[string]*domain.Pipeline
+	jobs          map[string]*domain.Job
+	attempts      map[string]*domain.Attempt
+	workers       map[string]*domain.Worker
+	previews      map[string]*domain.Preview
+	deliveries    map[string]string
+	tenantLimits  map[string]int
+	lastTenant    string
+	sequence      uint64
+	prStates      map[string]PRState
+	requestHashes map[string]string
+	metrics       Metrics
 }
 
 // New creates an empty control-plane store with safe defaults.
@@ -81,6 +86,18 @@ func New(config Config) *Store {
 	if config.PreviewDeleteDelay <= 0 {
 		config.PreviewDeleteDelay = 5 * time.Second
 	}
+	if config.MaxQueuedJobs <= 0 {
+		config.MaxQueuedJobs = 1000
+	}
+	if config.TenantCPU <= 0 {
+		config.TenantCPU = 16
+	}
+	if config.TenantMemoryMB <= 0 {
+		config.TenantMemoryMB = 32768
+	}
+	if config.Retention <= 0 {
+		config.Retention = 7 * 24 * time.Hour
+	}
 	return &Store{
 		config:       config,
 		pipelines:    make(map[string]*domain.Pipeline),
@@ -90,6 +107,7 @@ func New(config Config) *Store {
 		previews:     make(map[string]*domain.Preview),
 		deliveries:   make(map[string]string),
 		tenantLimits: make(map[string]int),
+		prStates:     make(map[string]PRState), requestHashes: make(map[string]string),
 	}
 }
 
@@ -101,6 +119,9 @@ func (s *Store) CreatePipeline(tenant, repo, commitSHA, trigger string, prNumber
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.queuedCountLocked()+len(order) > s.config.MaxQueuedJobs {
+		return domain.PipelineView{}, ErrCapacity
+	}
 	pipeline := s.createPipelineLocked(tenant, repo, commitSHA, trigger, prNumber, spec, order, now)
 	return s.pipelineViewLocked(pipeline.ID), nil
 }
@@ -123,6 +144,9 @@ func (s *Store) CreatePipelineForDelivery(deliveryID, tenant, repo, commitSHA, t
 		}
 		return s.pipelineViewLocked(pipelineID), true, nil
 	}
+	if s.queuedCountLocked()+len(order) > s.config.MaxQueuedJobs {
+		return domain.PipelineView{}, false, ErrCapacity
+	}
 	pipeline := s.createPipelineLocked(tenant, repo, commitSHA, trigger, prNumber, spec, order, now)
 	s.deliveries[deliveryID] = pipeline.ID
 	s.metrics.WebhookAccepted++
@@ -143,6 +167,11 @@ func (s *Store) MarkPreviewDeletingForDelivery(deliveryID, repo string, prNumber
 	s.deliveries[deliveryID] = ""
 	s.metrics.WebhookAccepted++
 	key := previewKey(repo, prNumber)
+	state := s.prStates[key]
+	state.Closed = true
+	state.UpdatedAt = now
+	state.Generation++
+	s.prStates[key] = state
 	preview, ok := s.previews[key]
 	if !ok {
 		preview = &domain.Preview{
@@ -170,9 +199,11 @@ func (s *Store) createPipelineLocked(tenant, repo, commitSHA, trigger string, pr
 		Trigger: trigger, PRNumber: prNumber, Status: domain.StateQueued, CreatedAt: now,
 	}
 	for _, name := range order {
+		s.sequence++
 		job := &domain.Job{
 			ID: newID("job"), PipelineID: pipeline.ID, Tenant: tenant, Name: name,
 			Spec: cloneJobSpec(spec.Jobs[name]), Status: domain.StateQueued, CreatedAt: now,
+			Sequence: s.sequence,
 		}
 		pipeline.JobIDs = append(pipeline.JobIDs, job.ID)
 		s.jobs[job.ID] = job
@@ -267,6 +298,11 @@ func (s *Store) ScheduleOne(now time.Time) (domain.AttemptLease, error) {
 			continue
 		}
 		for _, job := range byTenant[tenant] {
+			used := s.usedResourcesLocked(tenant, "")
+			if used.CPU+job.Spec.Resources.CPU > s.config.TenantCPU || used.Memory+job.Spec.Resources.Memory > s.config.TenantMemoryMB {
+				job.QueueReason = "tenant CPU or memory quota reached"
+				continue
+			}
 			worker := s.selectWorkerLocked(job, now)
 			if worker == nil {
 				job.QueueReason = "no eligible worker has matching capabilities and capacity"
@@ -327,6 +363,10 @@ func (s *Store) HeartbeatAttempt(id, token string, now time.Time) (domain.Attemp
 	if !active(attempt.Status) || attempt.LeaseToken != token || !now.Before(attempt.LeaseExpires) {
 		return domain.Attempt{}, ErrStaleLease
 	}
+	job := s.jobs[attempt.JobID]
+	if now.Sub(attempt.CreatedAt) >= jobTimeout(job) {
+		return domain.Attempt{}, ErrStaleLease
+	}
 	if attempt.Status == domain.StateLeased {
 		attempt.Status = domain.StateRunning
 		attempt.StartedAt = now
@@ -344,11 +384,21 @@ func (s *Store) CompleteAttempt(id, token string, success bool, message string, 
 	if !ok {
 		return domain.Attempt{}, ErrNotFound
 	}
+	wanted := domain.StateFailed
+	if success {
+		wanted = domain.StateSucceeded
+	}
+	if attempt.LeaseToken == token && attempt.Status == wanted && attempt.ResultMessage == message {
+		return *attempt, nil
+	}
 	if !active(attempt.Status) || attempt.LeaseToken != token || !now.Before(attempt.LeaseExpires) {
 		s.metrics.StaleCompletions++
 		return domain.Attempt{}, ErrStaleLease
 	}
 	job := s.jobs[attempt.JobID]
+	if now.Sub(attempt.CreatedAt) >= jobTimeout(job) {
+		return domain.Attempt{}, ErrStaleLease
+	}
 	if job.Status == domain.StateCancelled {
 		s.metrics.StaleCompletions++
 		return domain.Attempt{}, ErrStaleLease
@@ -359,9 +409,6 @@ func (s *Store) CompleteAttempt(id, token string, success bool, message string, 
 		attempt.Status = domain.StateSucceeded
 		job.Status = domain.StateSucceeded
 		s.metrics.JobsCompleted++
-		if job.Spec.Environment != nil {
-			s.activatePreviewLocked(s.pipelines[job.PipelineID], job.Spec.Environment, now)
-		}
 	} else {
 		attempt.Status = domain.StateFailed
 		job.Status = domain.StateFailed
@@ -398,14 +445,14 @@ func (s *Store) Reconcile(now time.Time) (expired, deleted int) {
 			preview.UpdatedAt = now
 		}
 		if preview.Desired == domain.StateDeleting {
-			preview.Actual = domain.StateDeleting
-			if now.Sub(preview.UpdatedAt) >= s.config.PreviewDeleteDelay {
+			if preview.Actual == domain.StateDeleted {
 				delete(s.previews, key)
 				deleted++
 				s.metrics.PreviewsDeleted++
 			}
 		}
 	}
+	s.pruneLocked(now)
 	return expired, deleted
 }
 
@@ -444,7 +491,7 @@ func (s *Store) runnableJobsLocked() map[string][]*domain.Job {
 			if !left.CreatedAt.Equal(right.CreatedAt) {
 				return left.CreatedAt.Before(right.CreatedAt)
 			}
-			return left.Name < right.Name
+			return left.Sequence < right.Sequence
 		})
 	}
 	return result
@@ -479,7 +526,14 @@ func (s *Store) selectWorkerLocked(job *domain.Job, now time.Time) *domain.Worke
 		if now.Sub(worker.Heartbeat) > s.config.WorkerTTL || s.activeForWorkerLocked(worker.ID) >= worker.Capacity {
 			continue
 		}
-		if job.Spec.Trusted && !worker.Trusted {
+		if job.Spec.Trusted != worker.Trusted {
+			continue
+		}
+		used := s.usedResourcesLocked("", worker.ID)
+		if worker.Resources.CPU > 0 && used.CPU+job.Spec.Resources.CPU > worker.Resources.CPU {
+			continue
+		}
+		if worker.Resources.Memory > 0 && used.Memory+job.Spec.Resources.Memory > worker.Resources.Memory {
 			continue
 		}
 		matched := true
@@ -526,13 +580,23 @@ func (s *Store) tenantLimitLocked(tenant string) int {
 func (s *Store) reconcileExpiredLocked(now time.Time) int {
 	count := 0
 	for _, attempt := range s.attempts {
-		if !active(attempt.Status) || now.Before(attempt.LeaseExpires) {
+		job := s.jobs[attempt.JobID]
+		if !active(attempt.Status) || (now.Before(attempt.LeaseExpires) && now.Sub(attempt.CreatedAt) < jobTimeout(job)) {
 			continue
 		}
 		attempt.Status = domain.StateLost
 		attempt.CompletedAt = now
-		job := s.jobs[attempt.JobID]
-		if job.Status != domain.StateCancelled {
+		limit := job.Spec.MaxAttempts
+		if limit <= 0 {
+			limit = 3
+		}
+		if now.Sub(attempt.CreatedAt) >= jobTimeout(job) || attempt.Number >= limit {
+			job.Status = domain.StateFailed
+			attempt.Status = domain.StateFailed
+			attempt.ResultMessage = "attempt timeout or retry limit exceeded"
+			s.metrics.JobsFailed++
+			s.updatePipelineLocked(s.pipelines[job.PipelineID], now)
+		} else if !terminal(job.Status) {
 			job.Status = domain.StateQueued
 			job.QueueReason = "previous attempt lease expired; waiting for retry"
 		}
@@ -553,6 +617,13 @@ func (s *Store) updatePipelineLocked(pipeline *domain.Pipeline, now time.Time) {
 				if !terminal(pending.Status) {
 					pending.Status = domain.StateCancelled
 					s.metrics.JobsCancelled++
+					for _, aid := range pending.AttemptIDs {
+						a := s.attempts[aid]
+						if active(a.Status) {
+							a.Status = domain.StateCancelled
+							a.CompletedAt = now
+						}
+					}
 				}
 			}
 			return
@@ -563,6 +634,11 @@ func (s *Store) updatePipelineLocked(pipeline *domain.Pipeline, now time.Time) {
 	}
 	if allSucceeded {
 		pipeline.Status = domain.StateSucceeded
+		for _, id := range pipeline.JobIDs {
+			if env := s.jobs[id].Spec.Environment; env != nil {
+				s.activatePreviewLocked(pipeline, env, now)
+			}
+		}
 	} else {
 		pipeline.Status = domain.StateRunning
 	}
@@ -601,6 +677,9 @@ func (s *Store) activatePreviewLocked(pipeline *domain.Pipeline, environment *do
 		return
 	}
 	key := previewKey(pipeline.Repo, pipeline.PRNumber)
+	if state, ok := s.prStates[key]; ok && (state.Closed || state.Generation != pipeline.Generation) {
+		return
+	}
 	if existing, ok := s.previews[key]; ok && existing.Desired == domain.StateDeleting {
 		return
 	}
@@ -611,12 +690,27 @@ func (s *Store) activatePreviewLocked(pipeline *domain.Pipeline, environment *do
 	namespace := previewNamespace(pipeline.Repo, pipeline.PRNumber)
 	preview := &domain.Preview{
 		Repo: pipeline.Repo, PRNumber: pipeline.PRNumber, Namespace: namespace,
-		URL:        fmt.Sprintf("https://%s.%s", namespace, s.config.PreviewBaseDomain),
-		Generation: 1, Desired: domain.StateActive, Actual: domain.StateActive,
+		Generation: pipeline.Generation, Desired: domain.StateActive, Actual: domain.StatePending,
 		ExpiresAt: now.Add(ttl), UpdatedAt: now,
+		Tenant: pipeline.Tenant, PipelineID: pipeline.ID, Image: environment.Image, Port: environment.Port, HealthPath: environment.HealthPath,
 	}
-	if old, ok := s.previews[key]; ok {
-		preview.Generation = old.Generation + 1
+	if preview.Port == 0 {
+		preview.Port = 8080
+	}
+	preview.Exposure = environment.Exposure
+	if preview.HealthPath == "" {
+		preview.HealthPath = "/"
+	}
+	if preview.Image == "" {
+		for _, id := range pipeline.JobIDs {
+			j := s.jobs[id]
+			if j.Spec.Buildkit != nil && len(j.AttemptIDs) > 0 {
+				a := s.attempts[j.AttemptIDs[len(j.AttemptIDs)-1]]
+				if a.ResultDigest != "" {
+					preview.Image = strings.Split(j.Spec.Buildkit.Destination, "@")[0] + "@" + a.ResultDigest
+				}
+			}
+		}
 	}
 	s.previews[key] = preview
 	s.metrics.PreviewsCreated++
@@ -624,6 +718,9 @@ func (s *Store) activatePreviewLocked(pipeline *domain.Pipeline, environment *do
 
 func (s *Store) pipelineViewLocked(id string) domain.PipelineView {
 	pipeline := s.pipelines[id]
+	if pipeline == nil {
+		return domain.PipelineView{}
+	}
 	view := domain.PipelineView{Pipeline: clonePipeline(pipeline)}
 	for _, jobID := range pipeline.JobIDs {
 		job := s.jobs[jobID]
@@ -657,6 +754,10 @@ func cloneJobSpec(spec domain.JobSpec) domain.JobSpec {
 		environment := *spec.Environment
 		copy.Environment = &environment
 	}
+	if spec.Buildkit != nil {
+		build := *spec.Buildkit
+		copy.Buildkit = &build
+	}
 	return copy
 }
 
@@ -676,17 +777,18 @@ func previewKey(repo string, prNumber int) string {
 func previewNamespace(repo string, prNumber int) string {
 	var builder strings.Builder
 	for _, r := range strings.ToLower(repo) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			builder.WriteRune(r)
 		} else if builder.Len() > 0 && !strings.HasSuffix(builder.String(), "-") {
 			builder.WriteByte('-')
 		}
 	}
 	name := strings.Trim(builder.String(), "-")
-	if len(name) > 40 {
-		name = name[:40]
+	if len(name) > 30 {
+		name = name[:30]
 	}
-	return fmt.Sprintf("preview-%s-%d", name, prNumber)
+	digest := sha256.Sum256([]byte(strings.ToLower(repo)))
+	return fmt.Sprintf("preview-%s-%x-%d", strings.Trim(name, "-"), digest[:4], prNumber)
 }
 
 func newID(prefix string) string {

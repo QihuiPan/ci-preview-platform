@@ -1,386 +1,439 @@
 package api
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/QihuiPan/ci-preview-platform/internal/auth"
 	"github.com/QihuiPan/ci-preview-platform/internal/control"
 	"github.com/QihuiPan/ci-preview-platform/internal/domain"
-	githubwebhook "github.com/QihuiPan/ci-preview-platform/internal/github"
+	githubapp "github.com/QihuiPan/ci-preview-platform/internal/github"
+	"github.com/QihuiPan/ci-preview-platform/internal/objectstore"
+	"github.com/QihuiPan/ci-preview-platform/internal/persistence"
+	"github.com/QihuiPan/ci-preview-platform/internal/planner"
 )
 
-const maxRequestBytes = 1 << 20
-
-// Server exposes the control-plane HTTP API.
+type Options struct {
+	Backend       persistence.Backend
+	Auth          auth.Config
+	WebhookSecret string
+	GitHub        *githubapp.App
+	Objects       *objectstore.S3
+	Logger        *slog.Logger
+}
 type Server struct {
-	store         *control.Store
-	webhookSecret string
-	logger        *slog.Logger
-	now           func() time.Time
-	handler       http.Handler
+	Options
+	handler http.Handler
 }
 
-// NewServer creates a production-shaped API with health, readiness, and metrics endpoints.
-func NewServer(store *control.Store, webhookSecret string, logger *slog.Logger) *Server {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	server := &Server{store: store, webhookSecret: webhookSecret, logger: logger, now: time.Now}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", server.health)
-	mux.HandleFunc("GET /readyz", server.ready)
-	mux.HandleFunc("GET /metrics", server.metrics)
-	mux.HandleFunc("POST /v1/webhooks/github", server.githubWebhook)
-	mux.HandleFunc("POST /v1/pipelines", server.createPipeline)
-	mux.HandleFunc("GET /v1/pipelines/{id}", server.getPipeline)
-	mux.HandleFunc("POST /v1/jobs/{id}/cancel", server.cancelJob)
-	mux.HandleFunc("POST /v1/workers/register", server.registerWorker)
-	mux.HandleFunc("POST /v1/workers/{id}/heartbeat", server.workerHeartbeat)
-	mux.HandleFunc("GET /v1/workers/{id}/assignments", server.workerAssignments)
-	mux.HandleFunc("POST /v1/attempts/{id}/heartbeat", server.attemptHeartbeat)
-	mux.HandleFunc("POST /v1/attempts/{id}/complete", server.completeAttempt)
-	mux.HandleFunc("GET /v1/previews/{repo}/{pr}", server.getPreview)
-	server.handler = server.logging(mux)
-	return server
-}
+var errForbidden = errors.New("access denied")
 
-// ServeHTTP implements http.Handler.
-func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	s.handler.ServeHTTP(writer, request)
-}
-
-func (s *Server) health(writer http.ResponseWriter, _ *http.Request) {
-	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *Server) ready(writer http.ResponseWriter, _ *http.Request) {
-	writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
-}
-
-func (s *Server) metrics(writer http.ResponseWriter, _ *http.Request) {
-	metrics := s.store.Metrics()
-	writer.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	_, _ = fmt.Fprintf(writer,
-		"# HELP ci_webhook_accepted_total GitHub deliveries accepted by the control plane.\n"+
-			"# TYPE ci_webhook_accepted_total counter\nci_webhook_accepted_total %d\n"+
-			"# HELP ci_webhook_duplicate_total Duplicate GitHub deliveries returned without new side effects.\n"+
-			"# TYPE ci_webhook_duplicate_total counter\nci_webhook_duplicate_total %d\n"+
-			"# HELP ci_leases_issued_total Job execution leases issued to workers.\n"+
-			"# TYPE ci_leases_issued_total counter\nci_leases_issued_total %d\n"+
-			"# HELP ci_leases_expired_total Active leases reconciled after their deadline.\n"+
-			"# TYPE ci_leases_expired_total counter\nci_leases_expired_total %d\n"+
-			"# HELP ci_stale_completions_total Worker completions rejected by lease compare-and-set.\n"+
-			"# TYPE ci_stale_completions_total counter\nci_stale_completions_total %d\n"+
-			"# HELP ci_jobs_completed_total Jobs completed successfully.\n"+
-			"# TYPE ci_jobs_completed_total counter\nci_jobs_completed_total %d\n"+
-			"# HELP ci_jobs_failed_total Jobs completed with failure.\n"+
-			"# TYPE ci_jobs_failed_total counter\nci_jobs_failed_total %d\n"+
-			"# HELP ci_jobs_cancelled_total Jobs cancelled before completion.\n"+
-			"# TYPE ci_jobs_cancelled_total counter\nci_jobs_cancelled_total %d\n"+
-			"# HELP ci_previews_created_total Preview records activated after successful pipelines.\n"+
-			"# TYPE ci_previews_created_total counter\nci_previews_created_total %d\n"+
-			"# HELP ci_previews_deleted_total Preview records removed after reconciliation.\n"+
-			"# TYPE ci_previews_deleted_total counter\nci_previews_deleted_total %d\n",
-		metrics.WebhookAccepted, metrics.WebhookDuplicate, metrics.LeasesIssued, metrics.LeasesExpired,
-		metrics.StaleCompletions, metrics.JobsCompleted, metrics.JobsFailed, metrics.JobsCancelled,
-		metrics.PreviewsCreated, metrics.PreviewsDeleted,
-	)
-}
-
-func (s *Server) githubWebhook(writer http.ResponseWriter, request *http.Request) {
-	if s.webhookSecret == "" {
-		writeError(writer, http.StatusServiceUnavailable, "webhook_secret_missing", "GitHub webhook verification is not configured")
-		return
+func New(o Options) *Server {
+	if o.Logger == nil {
+		o.Logger = slog.Default()
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, maxRequestBytes))
-	if err != nil {
-		writeError(writer, http.StatusBadRequest, "invalid_body", "Request body is invalid or too large")
-		return
+	s := &Server{Options: o}
+	m := http.NewServeMux()
+	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	m.HandleFunc("GET /readyz", s.ready)
+	m.HandleFunc("POST /v1/webhooks/github", s.webhook)
+	routes := map[string]string{
+		"GET /metrics": "admin", "GET /v1/pipelines": "admin tenant", "POST /v1/pipelines": "admin tenant", "GET /v1/pipelines/{id}": "admin tenant", "POST /v1/pipelines/{id}/cancel": "admin tenant", "POST /v1/jobs/{id}/cancel": "admin tenant", "GET /v1/previews": "admin tenant",
+		"POST /v1/workers/register": "worker", "POST /v1/workers/{id}/heartbeat": "worker", "GET /v1/workers/{id}/assignments": "worker", "POST /v1/attempts/{id}/heartbeat": "worker", "POST /v1/attempts/{id}/complete": "worker", "GET /v1/attempts/{id}/source-token": "worker", "PUT /v1/attempts/{id}/objects/{name}": "worker", "GET /v1/attempts/{id}/objects/{name}": "admin tenant", "GET /v1/internal/previews": "controller", "POST /v1/internal/previews/observe": "controller",
 	}
-	if err := githubwebhook.VerifySignature(s.webhookSecret, body, request.Header.Get("X-Hub-Signature-256")); err != nil {
-		writeError(writer, http.StatusUnauthorized, "invalid_signature", err.Error())
-		return
-	}
-	deliveryID := request.Header.Get("X-GitHub-Delivery")
-	event := request.Header.Get("X-GitHub-Event")
-	var payload githubPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
-		writeError(writer, http.StatusBadRequest, "invalid_json", "Webhook body must be valid JSON")
-		return
-	}
-	repo := payload.Repository.FullName
-	if repo == "" {
-		writeError(writer, http.StatusBadRequest, "missing_repository", "Webhook repository.full_name is required")
-		return
-	}
-	tenant := strings.SplitN(repo, "/", 2)[0]
-	now := s.now()
-
-	switch event {
-	case "pull_request":
-		if payload.PullRequest.Number == 0 {
-			writeError(writer, http.StatusBadRequest, "missing_pull_request", "Webhook pull_request.number is required")
-			return
-		}
-		if payload.Action == "closed" {
-			duplicate, err := s.store.MarkPreviewDeletingForDelivery(deliveryID, repo, payload.PullRequest.Number, now)
-			if err != nil {
-				s.writeStoreError(writer, err)
+	routes["GET /v1/internal/active-attempts"] = "controller"
+	for route, roles := range routes {
+		m.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
+			p, ok := s.Auth.Authenticate(r.Header.Get("Authorization"))
+			if !ok {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				writeError(w, 401, "A valid bearer token is required")
 				return
 			}
-			writeJSON(writer, statusForDuplicate(duplicate), map[string]any{"duplicate": duplicate, "preview_state": domain.StateDeleting})
+			if !strings.Contains(" "+roles+" ", " "+p.Role+" ") {
+				writeError(w, 403, "Access denied")
+				return
+			}
+			s.dispatch(w, r, p, route)
+		})
+	}
+	slots := make(chan struct{}, 64)
+	s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			writeError(w, 429, "Server is busy; retry with backoff")
 			return
 		}
-		if payload.Action != "opened" && payload.Action != "reopened" && payload.Action != "synchronize" {
-			writeJSON(writer, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "pull request action is not buildable"})
-			return
-		}
-		spec := defaultPipelineSpec(!payload.PullRequest.Head.Repository.Fork, true)
-		view, duplicate, err := s.store.CreatePipelineForDelivery(deliveryID, tenant, repo, payload.PullRequest.Head.SHA, event, payload.PullRequest.Number, spec, now)
-		if err != nil {
-			s.writeStoreError(writer, err)
-			return
-		}
-		writeJSON(writer, statusForDuplicate(duplicate), map[string]any{"duplicate": duplicate, "pipeline": view})
-	case "push":
-		view, duplicate, err := s.store.CreatePipelineForDelivery(deliveryID, tenant, repo, payload.After, event, 0, defaultPipelineSpec(true, false), now)
-		if err != nil {
-			s.writeStoreError(writer, err)
-			return
-		}
-		writeJSON(writer, statusForDuplicate(duplicate), map[string]any{"duplicate": duplicate, "pipeline": view})
-	default:
-		writeJSON(writer, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "event type is not supported"})
-	}
-}
-
-func (s *Server) createPipeline(writer http.ResponseWriter, request *http.Request) {
-	var input struct {
-		Tenant    string              `json:"tenant"`
-		Repo      string              `json:"repo"`
-		CommitSHA string              `json:"commit_sha"`
-		Trigger   string              `json:"trigger"`
-		PRNumber  int                 `json:"pr_number"`
-		Spec      domain.PipelineSpec `json:"spec"`
-	}
-	if !decodeJSON(writer, request, &input) {
-		return
-	}
-	if input.Tenant == "" || input.Repo == "" || input.CommitSHA == "" {
-		writeError(writer, http.StatusBadRequest, "missing_fields", "tenant, repo, and commit_sha are required")
-		return
-	}
-	if input.Trigger == "" {
-		input.Trigger = "manual"
-	}
-	view, err := s.store.CreatePipeline(input.Tenant, input.Repo, input.CommitSHA, input.Trigger, input.PRNumber, input.Spec, s.now())
-	if err != nil {
-		s.writeStoreError(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusCreated, view)
-}
-
-func (s *Server) getPipeline(writer http.ResponseWriter, request *http.Request) {
-	view, err := s.store.GetPipeline(request.PathValue("id"))
-	if err != nil {
-		s.writeStoreError(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, view)
-}
-
-func (s *Server) cancelJob(writer http.ResponseWriter, request *http.Request) {
-	job, err := s.store.CancelJob(request.PathValue("id"), s.now())
-	if err != nil {
-		s.writeStoreError(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, job)
-}
-
-func (s *Server) registerWorker(writer http.ResponseWriter, request *http.Request) {
-	var input struct {
-		ID           string   `json:"id"`
-		Pool         string   `json:"pool"`
-		Capabilities []string `json:"capabilities"`
-		Capacity     int      `json:"capacity"`
-		Trusted      bool     `json:"trusted"`
-	}
-	if !decodeJSON(writer, request, &input) {
-		return
-	}
-	capabilities := make(map[string]bool, len(input.Capabilities))
-	for _, capability := range input.Capabilities {
-		capabilities[capability] = true
-	}
-	worker, err := s.store.RegisterWorker(domain.Worker{
-		ID: input.ID, Pool: input.Pool, Capabilities: capabilities, Capacity: input.Capacity, Trusted: input.Trusted,
-	}, s.now())
-	if err != nil {
-		s.writeStoreError(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, worker)
-}
-
-func (s *Server) workerHeartbeat(writer http.ResponseWriter, request *http.Request) {
-	if err := s.store.HeartbeatWorker(request.PathValue("id"), s.now()); err != nil {
-		s.writeStoreError(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *Server) workerAssignments(writer http.ResponseWriter, request *http.Request) {
-	assignments, err := s.store.AssignedLeases(request.PathValue("id"))
-	if err != nil {
-		s.writeStoreError(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, map[string]any{"assignments": assignments})
-}
-
-func (s *Server) attemptHeartbeat(writer http.ResponseWriter, request *http.Request) {
-	var input struct {
-		LeaseToken string `json:"lease_token"`
-	}
-	if !decodeJSON(writer, request, &input) {
-		return
-	}
-	attempt, err := s.store.HeartbeatAttempt(request.PathValue("id"), input.LeaseToken, s.now())
-	if err != nil {
-		s.writeStoreError(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, attempt)
-}
-
-func (s *Server) completeAttempt(writer http.ResponseWriter, request *http.Request) {
-	var input struct {
-		LeaseToken string `json:"lease_token"`
-		Success    bool   `json:"success"`
-		Message    string `json:"message"`
-	}
-	if !decodeJSON(writer, request, &input) {
-		return
-	}
-	attempt, err := s.store.CompleteAttempt(request.PathValue("id"), input.LeaseToken, input.Success, input.Message, s.now())
-	if err != nil {
-		s.writeStoreError(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, attempt)
-}
-
-func (s *Server) getPreview(writer http.ResponseWriter, request *http.Request) {
-	prNumber, err := strconv.Atoi(request.PathValue("pr"))
-	if err != nil || prNumber <= 0 {
-		writeError(writer, http.StatusBadRequest, "invalid_pull_request", "pr must be a positive integer")
-		return
-	}
-	preview, err := s.store.GetPreview(request.PathValue("repo"), prNumber)
-	if err != nil {
-		s.writeStoreError(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, preview)
-}
-
-func (s *Server) writeStoreError(writer http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, control.ErrNotFound):
-		writeError(writer, http.StatusNotFound, "not_found", err.Error())
-	case errors.Is(err, control.ErrStaleLease), errors.Is(err, control.ErrConflict):
-		writeError(writer, http.StatusConflict, "state_conflict", err.Error())
-	default:
-		writeError(writer, http.StatusBadRequest, "invalid_request", err.Error())
-	}
-}
-
-func (s *Server) logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(writer, request)
-		s.logger.Info("http request", "method", request.Method, "path", request.URL.Path, "duration_ms", time.Since(start).Milliseconds())
+		m.ServeHTTP(w, r)
 	})
+	return s
+}
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.ServeHTTP(w, r) }
+func allowed(p auth.Principal, tenant string) bool {
+	return p.Role == "admin" || p.Role == "tenant" && p.Tenant == tenant
+}
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if e := s.Backend.Ping(ctx); e != nil {
+		writeError(w, 503, "Database is unavailable")
+		return
+	}
+	if s.Objects != nil {
+		if e := s.Objects.Ping(ctx); e != nil {
+			writeError(w, 503, "Object storage is unavailable")
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]string{"status": "ready"})
+}
+func (s *Server) fail(w http.ResponseWriter, e error) {
+	switch {
+	case errors.Is(e, errForbidden):
+		writeError(w, 403, "Access denied")
+	case errors.Is(e, control.ErrNotFound):
+		writeError(w, 404, "Resource not found")
+	case errors.Is(e, control.ErrStaleLease), errors.Is(e, control.ErrConflict):
+		writeError(w, 409, e.Error())
+	case errors.Is(e, control.ErrCapacity):
+		w.Header().Set("Retry-After", "10")
+		writeError(w, 429, e.Error())
+	default:
+		s.Logger.Error("operation failed", "error", e)
+		writeError(w, 503, "Operation could not be committed; retry with the same request ID")
+	}
+}
+func (s *Server) normalize(in *control.Submission, p auth.Principal) error {
+	policy, ok := s.Auth.Repositories[in.Repo]
+	if !ok || !allowed(p, policy.Tenant) {
+		return errForbidden
+	}
+	in.Tenant = policy.Tenant
+	in.Trigger = "manual"
+	in.Closed = false
+	in.InstallationID = policy.InstallationID
+	in.EventTime = time.Time{}
+	if in.SourceRepo == "" {
+		in.SourceRepo = in.Repo
+	}
+	in.Fork = in.SourceRepo != in.Repo
+	if !planner.RepositoryPattern.MatchString(in.SourceRepo) || !planner.CommitPattern.MatchString(in.CommitSHA) || in.PRNumber < 0 || in.PRNumber > 99999999 {
+		return errors.New("valid source_repo, 40-character commit_sha and nonnegative PR number are required")
+	}
+	if in.Fork && !policy.AllowForks {
+		return errForbidden
+	}
+	if e := planner.Executable(&in.Spec, policy.Trusted && !in.Fork); e != nil {
+		return e
+	}
+	return validateDestinations(in.Spec, policy)
+}
+func validateDestinations(spec domain.PipelineSpec, p auth.Repository) error {
+	for _, j := range spec.Jobs {
+		if b := j.Buildkit; b != nil {
+			if p.ImagePrefix == "" || !strings.HasPrefix(b.Destination, p.ImagePrefix+"/") {
+				return errors.New("image destination is outside repository image_prefix")
+			}
+		}
+	}
+	return nil
 }
 
-func decodeJSON(writer http.ResponseWriter, request *http.Request, target any) bool {
-	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxRequestBytes))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		writeError(writer, http.StatusBadRequest, "invalid_json", err.Error())
+type completion struct {
+	LeaseToken string            `json:"lease_token"`
+	Success    bool              `json:"success"`
+	Message    string            `json:"message"`
+	Digest     string            `json:"digest"`
+	LogKey     string            `json:"log_key"`
+	Artefacts  []domain.Artefact `json:"artefacts"`
+}
+type observation struct {
+	Preview domain.Preview `json:"preview"`
+	Actual  domain.State   `json:"actual"`
+	URL     string         `json:"url"`
+	Error   string         `json:"error"`
+}
+
+func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, p auth.Principal, route string) {
+	var input control.Submission
+	var finish completion
+	var obs observation
+	if route == "POST /v1/pipelines" {
+		if !decode(w, r, &input) {
+			return
+		}
+		input.RequestID = r.Header.Get("Idempotency-Key")
+		if input.RequestID == "" || len(input.RequestID) > 200 {
+			writeError(w, 400, "Idempotency-Key of 1-200 characters is required")
+			return
+		}
+		if e := s.normalize(&input, p); e != nil {
+			if errors.Is(e, errForbidden) {
+				s.fail(w, e)
+			} else {
+				writeError(w, 400, e.Error())
+			}
+			return
+		}
+	}
+	if strings.HasPrefix(route, "POST /v1/attempts/") {
+		if !decode(w, r, &finish) {
+			return
+		}
+		if len(finish.Message) > 4096 || len(finish.Artefacts) > 8 || finish.Digest != "" && !planner.DigestPattern.MatchString(finish.Digest) {
+			writeError(w, 400, "Invalid completion metadata")
+			return
+		}
+		prefix := "attempts/" + r.PathValue("id") + "/"
+		if finish.LogKey != "" && !validObjectKey(finish.LogKey, prefix+"logs/") {
+			writeError(w, 400, "Invalid log key")
+			return
+		}
+		for _, a := range finish.Artefacts {
+			if !validObjectName(a.Name) || !validObjectKey(a.Key, prefix+a.Name+"/") || a.Size < 0 || a.Size > 16<<20 {
+				writeError(w, 400, "Invalid artifact reference")
+				return
+			}
+		}
+	}
+	if route == "POST /v1/internal/previews/observe" {
+		if !decode(w, r, &obs) {
+			return
+		}
+		if obs.Actual != domain.StateActive && obs.Actual != domain.StatePending && obs.Actual != domain.StateDeleted || len(obs.Error) > 4096 {
+			writeError(w, 400, "Invalid preview observation")
+			return
+		}
+	}
+	write := r.Method == "POST"
+	action := ""
+	if write {
+		action = p.Role + ":" + p.Tenant + " " + r.Method + " " + r.URL.Path
+	}
+	status := 200
+	var out any = map[string]string{"status": "ok"}
+	var pipeline domain.Pipeline
+	var key string
+	err := s.Backend.Transact(r.Context(), write, action, func(st *control.Store, now time.Time) error {
+		id := r.PathValue("id")
+		if strings.Contains(route, "/workers/{id}") && p.Worker.ID != id {
+			return errForbidden
+		}
+		var attempt domain.Attempt
+		var job domain.Job
+		if strings.Contains(route, "/attempts/{id}") {
+			var e error
+			attempt, job, pipeline, e = st.AttemptView(id)
+			if e != nil {
+				return e
+			}
+			if p.Role == "worker" {
+				if attempt.WorkerID != p.Worker.ID {
+					return errForbidden
+				}
+			} else if !allowed(p, pipeline.Tenant) {
+				return errForbidden
+			}
+		}
+		switch route {
+		case "POST /v1/pipelines":
+			v, dup, e := st.Submit(input, now)
+			out = map[string]any{"pipeline": v, "duplicate": dup}
+			if !dup {
+				status = 201
+			}
+			return e
+		case "GET /v1/pipelines":
+			tenant := p.Tenant
+			if p.Role == "admin" {
+				tenant = ""
+			}
+			out = map[string]any{"pipelines": st.PipelineList(tenant)}
+		case "GET /v1/pipelines/{id}", "POST /v1/pipelines/{id}/cancel":
+			v, e := st.GetPipeline(id)
+			if e != nil {
+				return e
+			}
+			if !allowed(p, v.Pipeline.Tenant) {
+				return errForbidden
+			}
+			if r.Method == "POST" {
+				for _, j := range v.Jobs {
+					if _, e = st.CancelJob(j.ID, now); e != nil {
+						return e
+					}
+				}
+				v, e = st.GetPipeline(id)
+			}
+			out = v
+			return e
+		case "POST /v1/jobs/{id}/cancel":
+			j, e := st.JobView(id)
+			if e != nil {
+				return e
+			}
+			if !allowed(p, j.Tenant) {
+				return errForbidden
+			}
+			out, e = st.CancelJob(id, now)
+			return e
+		case "POST /v1/workers/register":
+			v, e := st.RegisterWorker(*p.Worker, now)
+			out = v
+			return e
+		case "POST /v1/workers/{id}/heartbeat":
+			return st.HeartbeatWorker(id, now)
+		case "GET /v1/workers/{id}/assignments":
+			v, e := st.AssignedLeases(id)
+			out = map[string]any{"assignments": v}
+			return e
+		case "POST /v1/attempts/{id}/heartbeat":
+			v, e := st.HeartbeatAttempt(id, finish.LeaseToken, now)
+			out = v
+			return e
+		case "POST /v1/attempts/{id}/complete":
+			if finish.Success && job.Spec.Buildkit != nil && finish.Digest == "" {
+				return control.ErrConflict
+			}
+			v, e := st.Finish(id, finish.LeaseToken, finish.Success, finish.Message, finish.Digest, finish.LogKey, finish.Artefacts, now)
+			out = v
+			return e
+		case "GET /v1/attempts/{id}/source-token", "PUT /v1/attempts/{id}/objects/{name}":
+			if attempt.LeaseToken != r.Header.Get("X-Lease-Token") || !now.Before(attempt.LeaseExpires) || (attempt.Status != domain.StateRunning && attempt.Status != domain.StateLeased) {
+				return control.ErrStaleLease
+			}
+		case "GET /v1/attempts/{id}/objects/{name}":
+			if r.PathValue("name") == "logs" {
+				key = attempt.LogKey
+			} else {
+				for _, a := range attempt.Artefacts {
+					if a.Name == r.PathValue("name") {
+						key = a.Key
+					}
+				}
+			}
+			if key == "" {
+				return control.ErrNotFound
+			}
+		case "GET /v1/previews", "GET /v1/internal/previews":
+			v := []domain.Preview{}
+			for _, preview := range st.PreviewList() {
+				if p.Role == "controller" || allowed(p, preview.Tenant) {
+					v = append(v, preview)
+				}
+			}
+			out = map[string]any{"previews": v}
+		case "POST /v1/internal/previews/observe":
+			return st.ObservePreview(obs.Preview, obs.Actual, obs.URL, obs.Error)
+		case "GET /metrics":
+			out = st.Metrics()
+		case "GET /v1/internal/active-attempts":
+			out = map[string]any{"attempt_ids": st.ActiveAttemptIDs()}
+		}
+		return nil
+	})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	// External I/O is intentionally outside the database transaction.
+	switch route {
+	case "GET /metrics":
+		m := out.(control.Metrics)
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		fmt.Fprintf(w, "ci_leases_issued_total %d\nci_leases_expired_total %d\nci_jobs_completed_total %d\nci_jobs_failed_total %d\nci_jobs_cancelled_total %d\nci_webhook_accepted_total %d\nci_webhook_duplicate_total %d\n", m.LeasesIssued, m.LeasesExpired, m.JobsCompleted, m.JobsFailed, m.JobsCancelled, m.WebhookAccepted, m.WebhookDuplicate)
+		return
+	case "GET /v1/attempts/{id}/source-token":
+		token := ""
+		if s.GitHub != nil && pipeline.InstallationID != 0 && !pipeline.Fork {
+			token, err = s.GitHub.Token(r.Context(), pipeline.InstallationID)
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
+		out = map[string]string{"token": token}
+	case "PUT /v1/attempts/{id}/objects/{name}":
+		name := r.PathValue("name")
+		if !validObjectName(name) {
+			writeError(w, 400, "Unsupported artifact name")
+			return
+		}
+		if s.Objects == nil {
+			writeError(w, 503, "Object storage is not configured")
+			return
+		}
+		limit := int64(16 << 20)
+		if name == "logs" {
+			limit = 1 << 20
+		}
+		body, e := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+		if e != nil {
+			writeError(w, 413, "Artifact exceeds size limit")
+			return
+		}
+		key, e = s.Objects.Put(r.Context(), "attempts/"+r.PathValue("id")+"/"+name, body)
+		if e != nil {
+			s.fail(w, e)
+			return
+		}
+		sum := sha256.Sum256(body)
+		out = domain.Artefact{Name: name, Key: key, Digest: "sha256:" + hex.EncodeToString(sum[:]), Size: int64(len(body))}
+		status = 201
+	case "GET /v1/attempts/{id}/objects/{name}":
+		if s.Objects == nil {
+			writeError(w, 503, "Object storage is not configured")
+			return
+		}
+		b, e := s.Objects.Get(r.Context(), key)
+		if e != nil {
+			s.fail(w, e)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+r.PathValue("name")+`"`)
+		w.Write(b)
+		return
+	}
+	writeJSON(w, status, out)
+}
+func validObjectName(name string) bool {
+	return name == "logs" || name == "artifacts.tar" || name == "provenance.json" || name == "build-metadata.json"
+}
+func validObjectKey(key, prefix string) bool {
+	return strings.HasPrefix(key, prefix) && len(strings.TrimPrefix(key, prefix)) == 64 && planner.DigestPattern.MatchString("sha256:"+strings.TrimPrefix(key, prefix))
+}
+func decode(w http.ResponseWriter, r *http.Request, target any) bool {
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	d.DisallowUnknownFields()
+	if e := d.Decode(target); e != nil {
+		writeError(w, 400, "Invalid JSON: "+e.Error())
 		return false
 	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeError(writer, http.StatusBadRequest, "invalid_json", "Request body must contain one JSON value")
+	if e := d.Decode(new(any)); e != io.EOF {
+		writeError(w, 400, "Expected one JSON value")
 		return false
 	}
 	return true
 }
-
-func writeJSON(writer http.ResponseWriter, status int, value any) {
-	writer.Header().Set("Content-Type", "application/json")
-	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(value)
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
-
-func writeError(writer http.ResponseWriter, status int, code, message string) {
-	writeJSON(writer, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
-}
-
-func statusForDuplicate(duplicate bool) int {
-	if duplicate {
-		return http.StatusOK
-	}
-	return http.StatusAccepted
-}
-
-type githubPayload struct {
-	Action     string `json:"action"`
-	After      string `json:"after"`
-	Repository struct {
-		FullName string `json:"full_name"`
-	} `json:"repository"`
-	PullRequest struct {
-		Number int `json:"number"`
-		Head   struct {
-			SHA        string `json:"sha"`
-			Repository struct {
-				Fork bool `json:"fork"`
-			} `json:"repo"`
-		} `json:"head"`
-	} `json:"pull_request"`
-}
-
-func defaultPipelineSpec(trusted, includePreview bool) domain.PipelineSpec {
-	jobs := map[string]domain.JobSpec{
-		"test": {
-			Image: "golang:1.26.5", Command: []string{"go", "test", "./..."},
-			Capabilities: []string{"linux-amd64"}, Trusted: trusted,
-			Resources: domain.Resources{CPU: 1, Memory: 1024},
-		},
-		"image": {
-			Image: "moby/buildkit:rootless", Command: []string{"buildctl-daemonless.sh", "build"},
-			Needs: []string{"test"}, Capabilities: []string{"linux-amd64", "buildkit-rootless"}, Trusted: trusted,
-			Resources: domain.Resources{CPU: 2, Memory: 2048},
-		},
-	}
-	if includePreview {
-		jobs["preview"] = domain.JobSpec{
-			Image: "alpine:3", Command: []string{"true"}, Needs: []string{"image"},
-			Capabilities: []string{"linux-amd64"}, Trusted: trusted,
-			Resources:   domain.Resources{CPU: 1, Memory: 128},
-			Environment: &domain.Environment{TTLMinutes: 24 * 60, Exposure: "public"},
-		}
-	}
-	return domain.PipelineSpec{Version: 1, Jobs: jobs}
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]any{"error": map[string]string{"message": message}})
 }

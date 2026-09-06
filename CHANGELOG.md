@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. The format foll
 
 ## Unreleased
 
+### Added
+
+- Added encrypted PostgreSQL transactions, repository-scoped bearer authentication, immutable YAML plans, GitHub App integration, actual Kubernetes execution, rootless image builds, S3 artifacts, and readiness-driven preview reconciliation.
+- Added the tenant CLI, self-contained Helm installation, and real PostgreSQL and kind acceptance suites. This development candidate is not release-verified yet.
+
+### Fixed
+
+- Fixed resource leaks from failed parallel branches, bounded lease retries, fenced stale PR events, and removed simulated execution and simulated preview success.
+
 ### Changed
 
 - Recorded the successful Linux race, build, Compose validation, and container build release gate for version 0.1.0.

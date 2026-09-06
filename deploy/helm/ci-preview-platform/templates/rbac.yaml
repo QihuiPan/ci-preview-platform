@@ -1,0 +1,47 @@
+{{- range list "worker" "controller" }}
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: {{ $.Release.Name }}-{{ . }}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: {{ $.Release.Namespace }}-{{ $.Release.Name }}-{{ . }}}
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, create, patch, delete]
+  - apiGroups: [""]
+    resources: [serviceaccounts, resourcequotas, secrets]
+    verbs: [get, create, patch]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, create, patch]
+  {{- if eq . "worker" }}
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, create, patch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+  {{- else }}
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, create, patch]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, create, patch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, create, patch]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: {{ $.Release.Namespace }}-{{ $.Release.Name }}-{{ . }}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ $.Release.Namespace }}-{{ $.Release.Name }}-{{ . }}}
+subjects: [{kind: ServiceAccount, name: {{ $.Release.Name }}-{{ . }}, namespace: {{ $.Release.Namespace }}}]
+---
+{{- end }}

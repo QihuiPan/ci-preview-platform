@@ -9,3 +9,9 @@ coverage/
 dist/
 work/
 outputs/
+secrets/
+*.pem
+*.key
+*.tfstate*
+.terraform/
+data/
