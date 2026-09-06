@@ -18,6 +18,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Corrected the example repository's immutable commit SHA against both Git and the GitHub API, and added an early fixture-availability check before cluster image builds.
+- Added the patched object-store image input to the optional Terraform wrapper and documented explicit cluster authentication and ownership constraints.
+- Required the updated preview replica to finish rolling out before marking a new image active; added stale-generation and mixed-revision readiness regression tests.
 - Shared the exact-worktree Git configuration with build commands without persisting checkout credentials.
 - Prevented the worker polling loop from reclaiming an abandoned lease and bypassing the bounded infrastructure retry budget; added a regression test.
 - Restricted Git safe-directory configuration to the root-owned workspace mount and surfaced checkout exit reasons and stored logs in acceptance failures.

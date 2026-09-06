@@ -76,7 +76,7 @@ func TestRealClusterLifecycle(t *testing.T) {
 		t.Fatalf("pipeline did not reach %s; last state: %s", wanted, call("GET", "/v1/pipelines/"+id, "", nil, 200))
 		return domain.PipelineView{}
 	}
-	in := control.Submission{Repo: "octocat/Hello-World", CommitSHA: "7fd1a60b01f91b314f599c7452940e383a528cfb", PRNumber: 42, Spec: domain.PipelineSpec{Version: 1, Jobs: map[string]domain.JobSpec{"test": {Image: "alpine:3.21", Command: []string{"sh", "-ec", `test -f README; test ! -f /var/run/secrets/kubernetes.io/serviceaccount/token; mkdir -p artifacts; echo real-container-success | tee artifacts/result.txt`}, Resources: domain.Resources{CPU: 1, Memory: 128}, Environment: &domain.Environment{TTLMinutes: 2, Exposure: "internal", Image: previewImage, Port: 8080, HealthPath: "/"}}}}}
+	in := control.Submission{Repo: "octocat/Hello-World", CommitSHA: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d", PRNumber: 42, Spec: domain.PipelineSpec{Version: 1, Jobs: map[string]domain.JobSpec{"test": {Image: "alpine:3.21", Command: []string{"sh", "-ec", `test -f README; test ! -f /var/run/secrets/kubernetes.io/serviceaccount/token; mkdir -p artifacts; echo real-container-success | tee artifacts/result.txt`}, Resources: domain.Resources{CPU: 1, Memory: 128}, Environment: &domain.Environment{TTLMinutes: 2, Exposure: "internal", Image: previewImage, Port: 8080, HealthPath: "/"}}}}}
 	var submitted struct {
 		Pipeline domain.PipelineView `json:"pipeline"`
 	}

@@ -17,3 +17,7 @@ variable "existing_secret" {
   type        = string
   default     = "ci-secrets"
 }
+variable "minio_image" {
+  description = "Pullable MinIO image built with the release Dockerfile.minio."
+  type        = string
+}

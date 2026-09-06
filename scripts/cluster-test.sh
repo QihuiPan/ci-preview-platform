@@ -2,6 +2,8 @@
 set -euo pipefail
 # Run only against a disposable cluster named ci-preview-test.
 test "$(kubectl config current-context)" = "kind-ci-preview-test"
+# Fail before expensive image builds if the immutable public fixture is unavailable.
+curl -fsS --retry 3 https://api.github.com/repos/octocat/Hello-World/git/commits/7fd1a60b01f91b314f59955a4e4d4e80d8edf11d >/dev/null
 docker build -t ci-preview-platform:e2e .
 docker build -f Dockerfile.minio -t ci-preview-minio:2025-10-15 .
 kind load docker-image ci-preview-platform:e2e --name ci-preview-test

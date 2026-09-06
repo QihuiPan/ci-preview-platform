@@ -47,7 +47,7 @@ go build -o bin/cictl.exe ./cmd/cictl
 $env:API_URL = 'http://127.0.0.1:8080'
 $encoded = kubectl get secret ci-secrets -n ci-platform -o jsonpath='{.data.tenant-token}'
 $env:API_TOKEN = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
-./bin/cictl.exe submit --file config/demo.pipeline.yml --repo octocat/Hello-World --sha 7fd1a60b01f91b314f599c7452940e383a528cfb --key first-job
+./bin/cictl.exe submit --file config/demo.pipeline.yml --repo octocat/Hello-World --sha 7fd1a60b01f91b314f59955a4e4d4e80d8edf11d --key first-job
 ./bin/cictl.exe pipelines
 ```
 

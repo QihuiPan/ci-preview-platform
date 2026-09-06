@@ -47,3 +47,24 @@ func TestNetworkPolicyRejectsPrivateNetworks(t *testing.T) {
 		}
 	}
 }
+
+func TestPreviewReadinessRejectsOldAvailableReplica(t *testing.T) {
+	for _, tc := range []struct {
+		name                                   string
+		observed, replicas, updated, available int
+		want                                   bool
+	}{
+		{"ready", 2, 1, 1, 1, true},
+		{"unobserved", 1, 1, 1, 1, false},
+		{"old replica still available", 2, 2, 1, 1, false},
+		{"new image not ready", 2, 1, 1, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := Object{"metadata": Object{"generation": 2}, "status": Object{"observedGeneration": tc.observed, "replicas": tc.replicas, "updatedReplicas": tc.updated, "availableReplicas": tc.available}}
+			got, e := deploymentReady(o)
+			if e != nil || got != tc.want {
+				t.Fatal("unexpected readiness", got, e)
+			}
+		})
+	}
+}

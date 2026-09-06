@@ -46,7 +46,7 @@ In a second shell, export the tenant token without printing it, then submit the 
 export API_URL=http://127.0.0.1:8080
 export API_TOKEN="$(kubectl get secret ci-secrets -n ci-platform -o jsonpath='{.data.tenant-token}' | base64 --decode)"
 bin/cictl submit --file config/demo.pipeline.yml --repo octocat/Hello-World \
-  --sha 7fd1a60b01f91b314f599c7452940e383a528cfb --key first-job
+  --sha 7fd1a60b01f91b314f59955a4e4d4e80d8edf11d --key first-job
 bin/cictl pipelines
 ```
 

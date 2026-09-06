@@ -62,21 +62,11 @@ func (c PreviewController) Reconcile(ctx context.Context, p domain.Preview) (dom
 	if e != nil {
 		return domain.StatePending, "", e
 	}
-	raw, _ := json.Marshal(deployment)
-	var status struct {
-		Metadata struct {
-			Generation int64 `json:"generation"`
-		} `json:"metadata"`
-		Status struct {
-			ObservedGeneration int64 `json:"observedGeneration"`
-			AvailableReplicas  int   `json:"availableReplicas"`
-			UpdatedReplicas    int   `json:"updatedReplicas"`
-		} `json:"status"`
-	}
-	if e = json.Unmarshal(raw, &status); e != nil {
+	ready, e := deploymentReady(deployment)
+	if e != nil {
 		return domain.StatePending, "", e
 	}
-	if status.Status.ObservedGeneration < status.Metadata.Generation || status.Status.AvailableReplicas < 1 || status.Status.UpdatedReplicas < 1 {
+	if !ready {
 		return domain.StatePending, "", nil
 	}
 	url := fmt.Sprintf("http://preview.%s.svc.cluster.local:%d", p.Namespace, p.Port)
@@ -91,6 +81,30 @@ func (c PreviewController) Reconcile(ctx context.Context, p domain.Preview) (dom
 		url = scheme + "://" + p.Namespace + "." + c.Domain
 	}
 	return domain.StateActive, url, nil
+}
+
+func deploymentReady(deployment Object) (bool, error) {
+	raw, e := json.Marshal(deployment)
+	if e != nil {
+		return false, e
+	}
+	var status struct {
+		Metadata struct {
+			Generation int64 `json:"generation"`
+		} `json:"metadata"`
+		Status struct {
+			ObservedGeneration int64 `json:"observedGeneration"`
+			Replicas           int   `json:"replicas"`
+			AvailableReplicas  int   `json:"availableReplicas"`
+			UpdatedReplicas    int   `json:"updatedReplicas"`
+		} `json:"status"`
+	}
+	if e = json.Unmarshal(raw, &status); e != nil {
+		return false, e
+	}
+	// An old available replica must not mask an unready new image during rollout.
+	s := status.Status
+	return status.Metadata.Generation > 0 && s.ObservedGeneration >= status.Metadata.Generation && s.Replicas == 1 && s.UpdatedReplicas == 1 && s.AvailableReplicas == 1, nil
 }
 func (c PreviewController) Manifests(p domain.Preview) []Object {
 	labels := Object{"app": "preview"}
