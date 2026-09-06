@@ -1,17 +1,15 @@
-# ADR 0002 Transactional PostgreSQL Target
+# ADR 0002 Transactional PostgreSQL runtime
 
 ## Status
 
-Accepted for production target; reference adapter implemented
-
-## Context
-
-Webhook deduplication, job assignment, quota checks, cancellation, and completion require atomic state transitions. A queue alone cannot prove these invariants after redelivery or process failure.
+Accepted for the small-team 0.2 runtime; supersedes the 0.1 target-only schema.
 
 ## Decision
 
-PostgreSQL is the durable source of truth. The target schema uses a primary key for delivery IDs and a partial unique index for one active attempt per job. Scheduling should use row locking or single-leader ownership. Version 0.1.0 keeps an in-memory adapter so the state machine and race tests run without infrastructure.
+Use one versioned encrypted state snapshot locked with SELECT FOR UPDATE for each mutation. Compute time from PostgreSQL after acquiring the lock, apply deterministic transitions, persist before acknowledgment, and keep all remote I/O outside the transaction. Use a bounded pool and transaction timeout. Protect lease secrets using AES-256-GCM and a separately backed-up key.
 
 ## Consequences
 
-The executable demo is not restart durable. A production adapter must preserve the same atomic method boundaries, store only token hashes, expose migration rollback policy, and pass the existing contract tests against PostgreSQL.
+This makes restart recovery, concurrent API coordination, duplicate handling, cancellation, and lease fencing executable today. It serializes all writes and scales with retained state size. It is not an enterprise throughput design. A future normalized-row migration needs explicit schema conversion and concurrency tests, not a cosmetic replacement of SQL files.
+
+The runtime schema is created in internal/persistence/backend.go; migrations/001_initial_schema.sql mirrors it for review. Startup migration uses a PostgreSQL advisory lock.

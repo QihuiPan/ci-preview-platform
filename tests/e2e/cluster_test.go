@@ -70,17 +70,24 @@ func TestRealClusterLifecycle(t *testing.T) {
 	var submitted struct {
 		Pipeline domain.PipelineView `json:"pipeline"`
 	}
+	in.Spec.Jobs["network"] = domain.JobSpec{Image: "curlimages/curl:8.12.1", Needs: []string{"test"}, Command: []string{"sh", "-ec", `if curl -k --connect-timeout 2 --max-time 3 https://kubernetes.default.svc/version; then echo "Unexpected Kubernetes API access"; exit 1; fi; echo "Network isolation verified"`}, Resources: domain.Resources{CPU: 1, Memory: 128}}
 	json.Unmarshal(call("POST", "/v1/pipelines", "cluster-success", in, 201), &submitted)
 	call("POST", "/v1/pipelines", "cluster-success", in, 200)
 	v := waitPipeline(submitted.Pipeline.Pipeline.ID, domain.StateSucceeded)
-	if len(v.Attempts) != 1 {
-		t.Fatal("expected a single real attempt")
+	if len(v.Attempts) != 2 {
+		t.Fatal("expected two real attempts")
 	}
-	logs := call("GET", "/v1/attempts/"+v.Attempts[0].ID+"/objects/logs", "", nil, 200)
+	var testAttempt string
+	for _, j := range v.Jobs {
+		if j.Name == "test" {
+			testAttempt = j.AttemptIDs[0]
+		}
+	}
+	logs := call("GET", "/v1/attempts/"+testAttempt+"/objects/logs", "", nil, 200)
 	if !bytes.Contains(logs, []byte("real-container-success")) {
 		t.Fatal("execution logs were not stored", string(logs))
 	}
-	if len(call("GET", "/v1/attempts/"+v.Attempts[0].ID+"/objects/artifacts.tar", "", nil, 200)) < 512 {
+	if len(call("GET", "/v1/attempts/"+testAttempt+"/objects/artifacts.tar", "", nil, 200)) < 512 {
 		t.Fatal("artifact archive was not persisted")
 	}
 	var preview domain.Preview

@@ -1,61 +1,36 @@
-# Threat Model
+# Threat model
 
-## Scope and assets
+## Assets and boundaries
 
-The protected assets are repository source, installation tokens, signing secrets, protected deployment credentials, cache and artefact integrity, tenant scheduling capacity, preview network boundaries, audit evidence, and the correctness of commit checks.
+Protect source code, GitHub installation tokens, registry credentials, bearer tokens, lease secrets, artifacts, scheduling capacity, and preview isolation. Boundaries are external caller -> API, API -> PostgreSQL/S3/GitHub, manager -> Kubernetes, trusted builder -> registry, and untrusted workload -> other cluster resources.
 
-The trust boundaries are GitHub to the event gateway, API clients to the control plane, control plane to workers, workers to Kubernetes and object storage, trusted versus untrusted worker pools, and preview namespaces to shared cluster services.
+## Implemented controls
 
-## Adversaries
-
-- An external sender can forge or replay webhook traffic.
-- A fork contributor can submit arbitrary code and configuration without repository secrets.
-- A compromised worker can delay, replay, or falsify a completion.
-- One tenant can flood the queue to consume shared capacity.
-- A malicious cache archive can overwrite files outside its extraction directory or exhaust storage.
-- A preview workload can probe other namespaces or cloud metadata.
-- An operator mistake can leave previews, exposure, or artefacts after pull-request closure.
-
-## Controls implemented in version 0.1.0
-
-| Threat | Control |
+| Threat | Implemented control |
 | --- | --- |
-| Forged webhook | Constant-time `sha256` HMAC verification; endpoint disabled without a secret. |
-| Webhook replay | Atomic delivery-ID deduplication. |
-| Invalid build graph | Unknown dependency, duplicate dependency, self-edge, cycle, and priority validation. |
-| Tenant starvation | Tenant round-robin before bounded priority and FIFO selection. |
-| Resource monopoly | Configurable concurrent-attempt quota per tenant. |
-| Stale worker result | Random lease token, deadline, immutable attempt number, and CAS completion. |
-| Worker pool escape | Capability and trust requirements checked before lease issue. |
-| Cache traversal | Slash normalization, clean-path validation, drive-path rejection, and size cap. |
-| Late preview creation | Close-event deletion tombstone created before cancellation. |
-| Container privilege | Non-root, read-only root filesystem, no Linux capabilities, runtime-default seccomp. |
+| Forged event | HMAC-SHA256 signature verification before parsing or external fetch |
+| Cross-tenant access | Role authentication and repository/tenant authorization on jobs, pipelines, previews and artifact downloads |
+| Trust escalation | Server-owned worker identity and repository policy; exact trusted/untrusted pool matching |
+| Mutable source | Full immutable commit SHA, repository allowlist, authenticated init-only checkout |
+| Replay and stale completion | Request-body digest, delivery dedupe, random leases, deadlines, idempotent matching results |
+| Close/reopen races | Durable PR clock, conservative equal-time close, generation-fenced observations |
+| Resource exhaustion | Admission cap, job limits, tenant/worker budgets, pod quotas, deadlines, bounded request/object sizes |
+| Credential exposure | Tokenless job ServiceAccount; no manager token in jobs; registry credentials only in trusted builders |
+| Cross-namespace probing | Default-deny ingress, restricted public-HTTPS/DNS egress, metadata/private-range exclusion |
+| Artifact overwrite/traversal | Attempt-scoped content hashes; regular-file-only bounded archive collection; no automatic extraction |
+| Persisted lease disclosure | AES-256-GCM encrypted state with a separately managed key |
+| Accidental cleanup | Deterministic namespaces, ownership checks, controller grace period |
 
-## Required production controls
+## Residual risks
 
-Version 0.1.0 is not approved for public untrusted execution. Production deployment requires:
+The worker/controller identities have cluster-wide management privileges. A compromised manager can compromise this dedicated execution cluster. This release does not provide workload mTLS, attestation-based worker identity, hardened VM sandboxes, hardware isolation, or admission verification of signed artifacts.
 
-- GitHub App installation-token exchange with least-privilege repository permissions;
-- mutually authenticated workload identity for worker routes;
-- authorization on tenant, repository, worker, attempt, log, artefact, and preview operations;
-- durable PostgreSQL transactions and append-only audit storage;
-- token hashing at rest and redaction in logs and traces;
-- per-installation admission limits and request rate limits;
-- dedicated trusted and untrusted Kubernetes node pools;
-- namespace Pod Security admission, ResourceQuota, LimitRange, default-deny NetworkPolicy, and metadata-service blocking;
-- rootless BuildKit where possible and no privileged builders for fork events;
-- short-lived object-store credentials constrained to one attempt prefix;
-- verified image digests, SBOMs, provenance attestations, and admission policy;
-- safe archive extraction with total expanded-size, file-count, symlink, hard-link, device, and compression-ratio limits;
-- DNS and ingress ownership checks plus exposure revocation before preview deletion;
-- secret rotation, backup, restore, incident response, and tenant offboarding procedures.
+Rootless BuildKit needs an explicit Pod Security/seccomp/AppArmor exception and no-process-sandbox mode. Only operator-trusted repositories may reach that pool. Non-root containers alone are not sufficient for adversarial multi-tenancy. Use sandboxed runtimes and dedicated nodes/clusters for mutually untrusted organizations.
 
-## Security acceptance tests
+NetworkPolicy enforcement depends on the CNI. The default blocks private registries and private service access; broadening it changes the threat model. External HTTPS remains available to repository code, so any secret intentionally placed in a build could be exfiltrated. Do not supply protected secrets to command jobs or forks.
 
-1. A webhook with an invalid signature returns `401` and creates no delivery or pipeline.
-2. A repeated valid delivery returns the original pipeline and does not duplicate jobs.
-3. A fork plan cannot lease a job that requires a trusted worker or protected capability.
-4. A completion after lease expiry returns `409` after a new attempt is issued.
-5. Cancellation and completion racing at the same barrier produce exactly one terminal pipeline state.
-6. Traversal and oversized cache entries are rejected before extraction.
-7. A pull-request close tombstone prevents a late preview completion from activating exposure.
+The auth Secret contains plaintext bearer credentials at the Kubernetes boundary, protected by Secret RBAC and cluster encryption-at-rest configuration. Database leases are encrypted; this does not encrypt source, logs, object data, or backups. Configure S3/PVC/database encryption and TLS according to your environment.
+
+Webhooks and public API endpoints must use HTTPS. Public previews must use a separate origin and domain from the authenticated API. Readiness is not an Internet connectivity test. Retention, ingress, DNS, image security updates, secret rotation and backups remain operator responsibilities.
+
+Security tests are regression evidence, not an independent audit or a claim that arbitrary hostile public submissions are safe.

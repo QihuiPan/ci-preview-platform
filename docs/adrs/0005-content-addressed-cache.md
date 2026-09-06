@@ -1,17 +1,15 @@
-# ADR 0005 Content Addressed Cache
+# ADR 0005 Content-addressed artifacts and cache boundary
 
 ## Status
 
-Accepted
-
-## Context
-
-Mutable cache names allow unrelated toolchains or lockfiles to collide, while unsafe archive extraction can overwrite files or exhaust storage.
+Accepted, narrowed to the implemented runtime.
 
 ## Decision
 
-Cache keys hash repository, toolchain, lockfile digest, and cache version with explicit separators. Archive entries are normalized and rejected when absolute, traversal-based, drive-qualified, negative-sized, or over the per-object limit. Production extraction must add aggregate size, file count, link, device, and compression-ratio controls.
+Runtime logs and artifacts are stored under attempts/ATTEMPT_ID/NAME/SHA256. The API authorizes access using committed attempt metadata and the owning tenant. Collect bounded regular files only; never automatically extract arbitrary archives into another job.
+
+The internal/cache package defines cache keys and validates archive paths, but distributed cache restore is not wired into command jobs. Do not describe the helper as a functioning cache service.
 
 ## Consequences
 
-Cache identity is deterministic and immutable. Changing any input deliberately produces a cold cache. Garbage collection needs a separate reachability and retention policy.
+Retries cannot overwrite another attempt's results. Content-addressed writes are safely repeatable. Uncommitted uploads can become orphans and are expired by the bucket lifecycle policy. Image registry caching and cross-job artifact transfer require a separate supported workflow before being advertised.

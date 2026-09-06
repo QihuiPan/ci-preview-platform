@@ -100,11 +100,8 @@ func TestPostgresRestartConcurrencyRollback(t *testing.T) {
 	badKey := make([]byte, 32)
 	badKey[0] = 1
 	wrong, e := Open(ctx, dsn, badKey, config)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer wrong.Close()
-	if e = wrong.Transact(ctx, false, "", func(*control.Store, time.Time) error { return nil }); e == nil {
+	if e == nil {
+		wrong.Close()
 		t.Fatal("wrong state key was accepted")
 	}
 }

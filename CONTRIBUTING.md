@@ -1,21 +1,11 @@
 # Contributing
 
-## Development requirements
+Use Go 1.26.5. Run gofmt, go vet ./..., and go test ./... before submitting a change. Linux CI also runs race detection and real PostgreSQL tests; cluster acceptance uses a disposable kind cluster with enforcing Calico policies.
 
-- Use Go 1.26 or newer.
-- Keep source comments, annotations, commit messages, API messages, documentation, and changelog entries in English.
-- Add an English `CHANGELOG.md` entry for every user-visible implementation update.
-- Do not commit credentials, webhook payloads containing private data, generated binaries, or local benchmark profiles.
+Every change commit must include an English CHANGELOG.md entry explaining added behavior, changed compatibility or fixed defects. All code comments, annotations, examples and documentation must be English.
 
-## Required checks
+Preserve API authorization and repository trust boundaries. Add a regression test for a correctness or security fix. Do not introduce a simulator fallback into the deployment runtime or claim a skipped integration test as passed.
 
-Run these commands before opening a pull request:
+Never commit App private keys, bearer tokens, database credentials, registry config, Terraform state or generated Secrets. Use synthetic values in tests and keep a security report private.
 
-```bash
-go fmt ./cmd/... ./internal/... ./tests/... ./benchmarks/...
-go vet ./...
-go test -race ./...
-go build ./cmd/...
-```
-
-Changes to state transitions, leases, cancellation, fairness, or preview reconciliation must include a deterministic failure-case test. Changes to public behavior must update the API documentation and changelog.
+Describe the actual verification performed and its limits. Changes to persistence, controller ownership, key handling or destructive cleanup require explicit upgrade and recovery notes.

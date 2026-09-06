@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"time"
 
@@ -201,38 +202,33 @@ func (s *Store) AttemptView(id string) (domain.Attempt, domain.Job, domain.Pipel
 
 // Finish saves immutable result metadata and the terminal transition together.
 func (s *Store) Finish(id, token string, success bool, message, digest, logKey string, artefacts []domain.Artefact, now time.Time) (domain.Attempt, error) {
-	// The durable repository serializes this operation with every other mutation.
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	a, ok := s.attempts[id]
 	if !ok {
-		s.mu.Unlock()
 		return domain.Attempt{}, ErrNotFound
 	}
 	if a.LeaseToken != token {
-		s.mu.Unlock()
 		return domain.Attempt{}, ErrStaleLease
 	}
 	if terminal(a.Status) {
 		copy := *a
-		s.mu.Unlock()
 		wanted := domain.StateFailed
 		if success {
 			wanted = domain.StateSucceeded
 		}
-		if copy.Status == wanted && copy.ResultMessage == message && copy.ResultDigest == digest && copy.LogKey == logKey {
+		if copy.Status == wanted && copy.ResultMessage == message && copy.ResultDigest == digest && copy.LogKey == logKey && slices.Equal(copy.Artefacts, artefacts) {
 			return copy, nil
 		}
 		return domain.Attempt{}, ErrConflict
 	}
-	if !now.Before(a.LeaseExpires) {
-		s.mu.Unlock()
+	if !now.Before(a.LeaseExpires) || now.Sub(a.CreatedAt) >= jobTimeout(s.jobs[a.JobID]) || !active(a.Status) {
 		return domain.Attempt{}, ErrStaleLease
 	}
 	a.ResultDigest = digest
 	a.LogKey = logKey
 	a.Artefacts = append([]domain.Artefact(nil), artefacts...)
-	s.mu.Unlock()
-	return s.CompleteAttempt(id, token, success, message, now)
+	return s.completeAttemptLocked(id, token, success, message, now)
 }
 
 func (s *Store) RecordCheck(id string, checkID int64, state domain.State) error {
@@ -367,6 +363,15 @@ func (s *Store) Snapshot() ([]byte, error) {
 	var b bytes.Buffer
 	err := gob.NewEncoder(&b).Encode(Snapshot{1, s.pipelines, s.jobs, s.attempts, s.workers, s.previews, s.deliveries, s.tenantLimits, s.prStates, s.requestHashes, s.lastTenant, s.sequence, s.metrics})
 	return b.Bytes(), err
+}
+
+// Copy produces an independent state machine for transactional test adapters.
+func (s *Store) Copy() (*Store, error) {
+	data, e := s.Snapshot()
+	if e != nil {
+		return nil, e
+	}
+	return Restore(s.config, data)
 }
 func Restore(config Config, data []byte) (*Store, error) {
 	s := New(config)

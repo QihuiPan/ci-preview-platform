@@ -1,19 +1,10 @@
-# Preview Cleanup Runbook
+# Preview cleanup
 
-## Trigger
+1. Use cictl previews to inspect desired state, observed state, pipeline owner, generation, expiration and last error.
+2. A PR close or TTL expiry requests DELETING. The controller deletes the owned namespace and reports DELETED only once it is absent.
+3. Check controller logs, Kubernetes events, ingress ownership and namespace finalizers if deletion does not converge. The controller must retain RBAC permissions during cleanup.
+4. Do not relabel a foreign namespace to make ownership checks pass. Investigate a collision or unauthorized creation.
+5. Verify the service, ingress and namespace are gone. Public DNS may remain wildcard-configured; it should no longer route to the removed service.
+6. The durable PR clock survives resource removal. Replaying an older open/synchronize event must not recreate the preview.
 
-Use this runbook when a pull request is closed but its preview remains exposed past the reconciliation objective, or when preview deletion counters stop moving.
-
-## Immediate checks
-
-1. Replay the original close delivery only if its signature and delivery ID are preserved; deduplication makes this safe.
-2. Read the preview record and confirm `desired_state` is `DELETING`.
-3. Confirm no later open or synchronize event was accepted for a different pull-request generation.
-4. Verify exposure is revoked before deleting workload resources.
-5. Identify all resources by repository, pull-request, generation, and owner labels.
-
-## Safe recovery
-
-In version 0.1.0, wait for `PREVIEW_DELETE_DELAY` and the next one-second reconciliation tick. In a GitOps deployment, remove the desired manifest, force an Argo CD refresh, and delete only resources that match the preview owner labels. Do not delete an unlabelled namespace or a namespace whose repository and pull-request labels do not match the record.
-
-Retain the deletion tombstone until DNS, ingress, namespace, and owned artefacts are absent. This prevents a delayed worker completion from recreating the preview.
+Before uninstalling the controller, allow dynamic namespaces to clean up. Uninstalling Helm alone does not remove resources created at runtime.

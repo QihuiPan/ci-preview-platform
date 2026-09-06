@@ -35,7 +35,18 @@ func (m *Memory) Transact(ctx context.Context, write bool, action string, f func
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return f(m.Store, time.Now().UTC())
+	if !write {
+		return f(m.Store, time.Now().UTC())
+	}
+	copy, e := m.Store.Copy()
+	if e != nil {
+		return e
+	}
+	if e = f(copy, time.Now().UTC()); e != nil {
+		return e
+	}
+	m.Store = copy
+	return nil
 }
 func (m *Memory) Ping(context.Context) error { return nil }
 func (m *Memory) Close()                     {}
@@ -75,6 +86,10 @@ func Open(ctx context.Context, dsn string, key []byte, config control.Config) (*
 	if err = p.migrate(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("initialize database: %w", err)
+	}
+	if err = p.Transact(ctx, false, "", func(*control.Store, time.Time) error { return nil }); err != nil {
+		pool.Close()
+		return nil, err
 	}
 	return p, nil
 }

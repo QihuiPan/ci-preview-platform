@@ -1,19 +1,13 @@
-# Benchmark Results
+# Scheduler benchmark
 
-## Local reference run
-
-The scheduler microbenchmark creates a one-job pipeline, selects it across three tenants, issues a lease, and commits the result. Run it with:
+Reproduce with:
 
 ```bash
-go test -run=^$ -bench=BenchmarkScheduleAndComplete -benchmem ./benchmarks
+go test -run '^$' -bench . -benchtime=100x -benchmem ./benchmarks
 ```
 
-Recorded on 2026-09-06 with Go 1.26.5 on Windows AMD64 and an AMD Ryzen 9 9950X with 16 cores and 32 logical processors:
+Local sample on 2026-09-06: Windows/amd64, Go 1.26.5, AMD Ryzen 9 9950X, 100 iterations: 7,811 ns/op, 885 B/op, 11 allocations/op for the in-memory schedule-and-complete transition. Pipeline creation is outside the timed section. History grows through the bounded sample.
 
-```text
-BenchmarkScheduleAndComplete-32    100    4558 ns/op    837 B/op    11 allocs/op
-```
+This is a microbenchmark, not end-to-end throughput, PostgreSQL transaction latency, build latency, or a promise about 100 simultaneous Kubernetes jobs. The separate fairness regression distributes 100 queued jobs across three tenants as 34/33/33. Real-cluster acceptance exercises a small lifecycle and does not replace capacity testing on the target infrastructure.
 
-The run used `-benchtime=100x` and an otherwise idle local development session. This is a reproducible reference, not a statistically complete capacity claim. Do not compare results from different power profiles or active workloads as if they were equivalent.
-
-The separate load acceptance test leases 100 jobs across three tenants and verifies that the prefix distribution never differs by more than one slot; its final distribution is 34, 33, and 33. This in-memory test proves policy behavior, not production throughput. A production capacity claim still requires durable PostgreSQL, multiple worker processes, queue-wait histograms, hardware and warm-pool disclosure, and cost accounting.
+The encrypted snapshot model rewrites state on mutation; measure retained state size and database latency before scaling beyond a small team.

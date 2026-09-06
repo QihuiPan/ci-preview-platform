@@ -1,20 +1,9 @@
-# Security Policy
+# Security policy
 
-## Supported versions
+Report suspected vulnerabilities privately to the repository owner through an established private contact channel or GitHub private vulnerability reporting when available. Do not open a public issue containing secrets or exploit details.
 
-Security fixes are provided for the latest tagged minor release.
+Include the affected commit, prerequisites, impact, and a minimal reproduction with synthetic credentials. No response-time or service-level guarantee is implied.
 
-## Reporting a vulnerability
+This is a self-hosted small-team service, not an audited public multi-tenant CI platform. Read the threat model and deployment assumptions before accepting untrusted code. Use a dedicated execution cluster and an enforcing CNI. Never grant fork jobs trusted builder credentials.
 
-Do not open a public issue for a suspected vulnerability. Use GitHub private vulnerability reporting for this repository and include:
-
-- the affected version or commit;
-- the attack prerequisites and impact;
-- a minimal reproduction that does not contain real secrets;
-- any suggested mitigation.
-
-Expect an acknowledgement within five business days. No service-level commitment is implied for this portfolio project.
-
-## Deployment warning
-
-Version 0.1.0 is a reference implementation, not an internet-ready hosted CI service. Before production use, add durable PostgreSQL transactions, workload identity, worker API authentication, secret brokering, object-store authorization, rate limiting, audit persistence, and real Kubernetes isolation. Review [`docs/threat-model.md`](docs/threat-model.md) and [`docs/known-limitations.md`](docs/known-limitations.md).
+Only the latest maintained release is intended to receive fixes. Operators remain responsible for rebuilding patched container images and updating supported dependencies.

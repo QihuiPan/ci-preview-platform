@@ -1,115 +1,43 @@
-# API Reference
+# API and CLI
 
-## Conventions
+All /v1 routes except the signed GitHub webhook require an Authorization: Bearer token header. Health and readiness are unauthenticated. Metrics require an administrator token. No API response exposes stored lease tokens except assignments to their configured worker.
 
-Requests and responses use JSON unless otherwise noted. Error responses have this form:
+| Method and route | Role | Purpose |
+| --- | --- | --- |
+| POST /v1/pipelines | tenant/admin | Submit a normalized pipeline; Idempotency-Key required |
+| GET /v1/pipelines | tenant/admin | Latest 200 visible pipelines |
+| GET /v1/pipelines/{id} | tenant/admin | Plan, jobs, attempts, result references |
+| POST /v1/pipelines/{id}/cancel | tenant/admin | Cancel all unfinished jobs |
+| POST /v1/jobs/{id}/cancel | tenant/admin | Cancel a job and dependent aggregate |
+| GET /v1/previews | tenant/admin | Visible desired and actual previews |
+| GET /v1/attempts/{id}/objects/{name} | tenant/admin | Download committed logs/artifacts |
+| POST /v1/workers/register | worker | Register the server-configured identity |
+| GET /v1/workers/{id}/assignments | owning worker | Poll current leases |
+| POST /v1/workers/{id}/heartbeat | owning worker | Renew worker presence |
+| POST /v1/attempts/{id}/heartbeat | owning worker | Renew with lease_token |
+| POST /v1/attempts/{id}/complete | owning worker | Commit result with lease_token |
+| GET /v1/attempts/{id}/source-token | owning worker | Short-lived checkout credential; X-Lease-Token required |
+| PUT /v1/attempts/{id}/objects/{name} | owning worker | Persist bounded content; X-Lease-Token required |
+| GET /v1/internal/previews | controller | Reconciliation input |
+| POST /v1/internal/previews/observe | controller | Generation-fenced observation |
+| GET /v1/internal/active-attempts | controller | Orphan cleanup input |
 
-```json
-{
-  "error": {
-    "code": "invalid_request",
-    "message": "Human-readable English explanation"
-  }
-}
-```
+The submission body uses repo, commit_sha, optional source_repo, pr_number, and spec. Tenant, trust, trigger and installation identity are server-authoritative. Unknown fields are rejected. Retry the same body with the same Idempotency-Key after network errors; a conflicting body returns 409. A semantic revision replay may return its original pipeline.
 
-Request bodies are limited to 1 MiB and reject unknown fields. The development API does not yet authenticate manual pipeline and worker routes; do not expose it publicly.
+Successful creation returns 201 with {pipeline: PipelineView, duplicate: false}. Replay returns 200. GitHub deliveries return 202 or 200. Authorization failures are 401/403; missing objects are 404; stale leases and state conflicts are 409; queue backpressure is 429 with Retry-After; dependency failures are 503. Do not retry a 409 completion as a fresh result.
 
-## Submit a pipeline
+Supported object names: logs, artifacts.tar, build-metadata.json, provenance.json. Objects are authenticated downloads, not public presigned URLs. JSON request bodies are limited to 1 MiB; artifact uploads are bounded separately.
 
-`POST /v1/pipelines`
+## CLI
 
-```json
-{
-  "tenant": "acme",
-  "repo": "acme/widget",
-  "commit_sha": "0123456789abcdef",
-  "trigger": "manual",
-  "pr_number": 184,
-  "spec": {
-    "version": 1,
-    "jobs": {
-      "test": {
-        "image": "golang:1.26.5",
-        "command": ["go", "test", "./..."],
-        "capabilities": ["linux-amd64"],
-        "resources": {"cpu": 1, "memory_mb": 1024}
-      }
-    }
-  }
-}
-```
+Set API_URL and either API_TOKEN or API_TOKEN_FILE. Build with go build -o bin/cictl ./cmd/cictl.
 
-The response is `201 Created` with the pipeline, jobs, and an empty attempt list. Invalid graphs return `400 Bad Request`.
+- cictl submit --file CONFIG --repo OWNER/REPO --sha FULL_SHA --key STABLE_ID [--pr NUMBER]
+- cictl pipelines
+- cictl show PIPELINE_ID
+- cictl cancel PIPELINE_ID
+- cictl previews
+- cictl logs ATTEMPT_ID
+- cictl artifact ATTEMPT_ID artifacts.tar
 
-## Receive a GitHub webhook
-
-`POST /v1/webhooks/github`
-
-Required headers:
-
-- `X-Hub-Signature-256: sha256=<hex hmac>`
-- `X-GitHub-Delivery: <unique delivery id>`
-- `X-GitHub-Event: pull_request` or `push`
-
-New supported deliveries return `202 Accepted`. A replay of the same delivery ID returns `200 OK` and the original logical result with `"duplicate": true`. Pull-request actions `opened`, `reopened`, and `synchronize` create a default pipeline. `closed` marks the preview for deletion and cancels non-terminal work.
-
-## Read a pipeline
-
-`GET /v1/pipelines/{id}`
-
-The response contains the immutable pipeline identity, ordered jobs, attempt history, timestamps, queue reason, and current states. Lease tokens are never present in this response.
-
-## Register and heartbeat a worker
-
-`POST /v1/workers/register`
-
-```json
-{
-  "id": "worker-1",
-  "pool": "trusted",
-  "capabilities": ["linux-amd64", "buildkit-rootless"],
-  "capacity": 4,
-  "trusted": true
-}
-```
-
-Registration is idempotent by worker ID and refreshes its heartbeat. Use `POST /v1/workers/{id}/heartbeat` with an empty JSON object to remain eligible.
-
-## Poll assignments
-
-`GET /v1/workers/{id}/assignments`
-
-The response contains active assignments for that worker. Each assignment includes a lease token and deadline. Treat the token as a short-lived credential and never log it.
-
-## Heartbeat and complete an attempt
-
-`POST /v1/attempts/{id}/heartbeat`
-
-```json
-{"lease_token": "lease_<random>"}
-```
-
-`POST /v1/attempts/{id}/complete`
-
-```json
-{
-  "lease_token": "lease_<random>",
-  "success": true,
-  "message": "isolated execution completed"
-}
-```
-
-A wrong, expired, cancelled, or superseded token returns `409 Conflict`. Workers must stop publishing logs or artefacts after this response.
-
-## Cancel a job
-
-`POST /v1/jobs/{id}/cancel`
-
-Cancellation applies to the pipeline in version 0.1.0. All non-terminal jobs become `CANCELLED`, active attempts are invalidated, and a related preview is marked for deletion.
-
-## Read a preview
-
-`GET /v1/previews/{repo}/{pr}`
-
-Encode the slash in a repository full name as `%2F`, for example `/v1/previews/acme%2Fwidget/184`. The response includes namespace, URL, generation, desired and actual state, expiry, and last update.
+The CLI writes JSON or requested artifact bytes to stdout and diagnostics to stderr. Protect downloaded artifacts and inspect archives before extraction. Omit --key only for a new logical submission; the generated key is printed to stderr for retries.

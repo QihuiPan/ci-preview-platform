@@ -1,23 +1,19 @@
 variable "namespace" {
-  description = "Namespace for the CI control plane."
+  description = "Existing namespace containing the application Secret."
   type        = string
-  default     = "ci-preview-system"
+  default     = "ci-platform"
 }
-
-variable "image_repository" {
-  description = "OCI repository for the control-plane image."
+variable "release_name" {
+  description = "Release name matching the database-url in the existing Secret."
   type        = string
-  default     = "ghcr.io/qihuipan/ci-preview-platform"
+  default     = "ci"
 }
-
-variable "image_tag" {
-  description = "Immutable control-plane image tag or digest."
+variable "image" {
+  description = "Pullable platform image built from the intended release."
   type        = string
-  default     = "0.1.0"
 }
-
-variable "github_webhook_secret" {
-  description = "GitHub App webhook HMAC secret."
+variable "existing_secret" {
+  description = "Existing complete application Secret; not managed in Terraform state."
   type        = string
-  sensitive   = true
+  default     = "ci-secrets"
 }

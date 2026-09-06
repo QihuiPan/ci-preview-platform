@@ -1,16 +1,10 @@
-# Webhook Replay Runbook
+# Webhook replay
 
-## Purpose
+1. Verify App installation ID, repository allowlist, configured webhook secret, HTTPS endpoint and App permissions.
+2. Find the original delivery in GitHub's App delivery history. Keep its delivery ID and signed body unchanged.
+3. Use GitHub's Redeliver action after fixing connectivity or configuration. A duplicate accepted delivery returns its existing logical result.
+4. A 401 means signature verification failed; 403 means repository/installation policy rejected it; 422 means the immutable revision has invalid or missing configuration; 429 means admission is full; 503 means a dependency is unavailable.
+5. Do not invent a new delivery ID to override an old body. A new revision should produce a new event and configuration digest.
+6. For out-of-order PR events, the stored updated_at clock and close tombstone win. Replaying an old head is intentionally ignored.
 
-Webhook replay is safe only when the original delivery ID and body are preserved. A new delivery ID represents new intent and can create a new pipeline.
-
-## Procedure
-
-1. Confirm the stored event type, repository, delivery ID, body digest, and receive time.
-2. Confirm the event body contains no credentials before copying it to a controlled test location.
-3. Recompute `X-Hub-Signature-256` with the active webhook secret.
-4. Send the original event name, delivery ID, and exact body bytes.
-5. Expect `200 OK` with `duplicate: true` when the original delivery was accepted.
-6. Verify no additional pipeline, jobs, or attempts were created.
-
-Do not change whitespace in the body after calculating the HMAC. Do not log the webhook secret or paste it into a shell history shared with other users.
+Never log the App private key, installation token, webhook signing secret, or full Authorization header while troubleshooting.

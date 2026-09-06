@@ -1,0 +1,14 @@
+version: 1
+jobs:
+  test:
+    type: command
+    image: alpine:3.21
+    command:
+      - sh
+      - -ec
+      - 'test -f README; mkdir -p artifacts; echo "A real CI container ran successfully" | tee artifacts/result.txt'
+    resources:
+      cpu: 1
+      memory_mb: 128
+    timeout_seconds: 300
+    max_attempts: 3

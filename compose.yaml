@@ -1,33 +1,27 @@
+# Development dependencies only. Actual job execution requires Kubernetes.
+# These credentials are intentionally local-only and must not be used in production.
 services:
-  api:
-    build:
-      context: .
-      args:
-        COMMAND: api
+  postgres:
+    image: postgres:17.6-alpine
     environment:
-      GITHUB_WEBHOOK_SECRET: local-development-secret
-      LISTEN_ADDR: :8080
-      LEASE_TTL: 15s
-      WORKER_TTL: 30s
-      DEFAULT_TENANT_LIMIT: "2"
-      PREVIEW_BASE_DOMAIN: preview.local
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
-
-  worker:
-    build:
-      context: .
-      args:
-        COMMAND: worker
-    command:
-      - -api=http://api:8080
-      - -id=worker-compose-1
-      - -pool=trusted
-      - -capabilities=linux-amd64,buildkit-rootless
-      - -capacity=4
-      - -trusted=true
-      - -job-duration=2s
-    depends_on:
-      - api
-    restart: unless-stopped
+      POSTGRES_DB: ci
+      POSTGRES_USER: ci
+      POSTGRES_PASSWORD: local-development-only
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ci -d ci"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: [server, /data]
+    environment:
+      MINIO_ROOT_USER: local-development
+      MINIO_ROOT_PASSWORD: local-development-only
+    ports: ["127.0.0.1:9000:9000"]
+    volumes: [minio-data:/data]
+volumes:
+  postgres-data:
+  minio-data:

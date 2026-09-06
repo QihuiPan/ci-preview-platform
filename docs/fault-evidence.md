@@ -1,27 +1,9 @@
-# Fault Exercise Evidence
+# Fault and recovery evidence
 
-## Acceptance matrix
+Automated regressions cover stale lease rejection, expired lease retry budgets, cancel-versus-complete races, capacity release after parallel failure, duplicate request conflict, durable PR close clocks, snapshot restoration, and TTL non-resurrection.
 
-| Injected condition | Expected invariant | Automated evidence |
-| --- | --- | --- |
-| Duplicate webhook delivery | One logical pipeline and no duplicate jobs | `TestCreatePipelineForDeliveryIsIdempotent`, `TestGitHubWebhookVerifiesAndDeduplicates` |
-| Cyclic or unknown dependency | Invalid pipeline is rejected before persistence | `TestValidateRejectsCycle`, `TestValidateRejectsUnknownDependency`, `TestManualPipelineRejectsCycle` |
-| One tenant submits a burst | Other tenants continue receiving slots | `TestSchedulerRotatesAcrossTenants`, `TestHundredConcurrentJobsRemainFair` |
-| Tenant reaches concurrent quota | Another eligible tenant can still schedule | `TestTenantQuotaDoesNotBlockAnotherTenant` |
-| Trusted job sees mixed worker pools | Only a trusted worker receives the lease | `TestTrustedJobUsesTrustedWorker` |
-| Worker stops renewing a lease | A new attempt is issued and old completion is rejected | `TestExpiredLeaseRetriesAndRejectsStaleCompletion` |
-| Cancellation races completion | Pipeline and job converge on one terminal state | `TestCancelCompletionRaceHasOneTerminalOutcome` |
-| Pull request closes during final work | Deletion tombstone blocks late preview activation | `TestClosedPreviewTombstonePreventsLateActivation` |
-| Malicious cache entry uses traversal or excess size | Entry is rejected before extraction | `TestValidateArchiveEntry` |
-| Full API-to-worker-to-preview path | Ordered attempts produce a final preview URL | `TestPipelineToPreviewFlow` and the manual process test in `test-report.md` |
+The PostgreSQL integration test uses two independent backend pools with 20 concurrent submissions, asserts one logical pipeline, injects a rollback, closes/reopens the connection, and rejects decryption with a different state key. It requires a disposable TEST_DATABASE_URL database and must never point at production.
 
-## Reproduction
+The real-cluster acceptance test executes successful and failing containers, collects logs/artifacts, checks preview HTTP, restarts the API, cancels a running pipeline and waits for TTL cleanup. See test-report.md for actual completed runs. The test does not claim a full chaos campaign or an SLA measurement.
 
-Run the deterministic fault suite with:
-
-```bash
-go test -count=100 ./internal/control ./internal/planner ./internal/cache
-go test -race ./...
-```
-
-The high repetition count exercises scheduling and cancellation ordering. The Linux race detector checks that the store lock protects all shared state. Failure output must retain IDs and states but must not include lease tokens or secrets.
+An infrastructure outage can leave an uploaded but uncommitted object or a terminating namespace. Lease fencing protects committed state; controller reconciliation and object lifecycle expiry clean up external leftovers.

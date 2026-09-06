@@ -1,25 +1,13 @@
-.PHONY: build test race vet format-check run worker benchmark
-
+.PHONY: build test race vet format-check benchmark
 build:
 	go build ./cmd/...
-
 test:
 	go test ./...
-
 race:
 	go test -race ./...
-
 vet:
 	go vet ./...
-
 format-check:
-	@test -z "$$(gofmt -l .)" || (gofmt -l . && exit 1)
-
-run:
-	GITHUB_WEBHOOK_SECRET=local-development-secret go run ./cmd/api
-
-worker:
-	go run ./cmd/worker -trusted=true
-
+	@test -z "$$(gofmt -l cmd internal tests benchmarks)" || (gofmt -l cmd internal tests benchmarks && exit 1)
 benchmark:
-	go test -bench=. -benchmem ./benchmarks
+	go test -run '^$$' -bench=. -benchtime=100x -benchmem ./benchmarks

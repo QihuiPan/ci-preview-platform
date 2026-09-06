@@ -380,6 +380,10 @@ func (s *Store) HeartbeatAttempt(id, token string, now time.Time) (domain.Attemp
 func (s *Store) CompleteAttempt(id, token string, success bool, message string, now time.Time) (domain.Attempt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.completeAttemptLocked(id, token, success, message, now)
+}
+
+func (s *Store) completeAttemptLocked(id, token string, success bool, message string, now time.Time) (domain.Attempt, error) {
 	attempt, ok := s.attempts[id]
 	if !ok {
 		return domain.Attempt{}, ErrNotFound

@@ -3,9 +3,18 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -17,6 +26,67 @@ import (
 	githubapp "github.com/QihuiPan/ci-preview-platform/internal/github"
 	"github.com/QihuiPan/ci-preview-platform/internal/persistence"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestSignedWebhookLoadsImmutableConfigurationAndFencesClose(t *testing.T) {
+	s, b := fixture()
+	key, e := rsa.GenerateKey(rand.Reader, 2048)
+	if e != nil {
+		t.Fatal(e)
+	}
+	app, e := githubapp.NewApp(1, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	if e != nil {
+		t.Fatal(e)
+	}
+	app.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var payload any
+		if strings.HasSuffix(r.URL.Path, "/access_tokens") {
+			payload = map[string]any{"token": "synthetic-installation-token", "expires_at": time.Now().Add(time.Hour)}
+		} else {
+			if r.URL.Query().Get("ref") != strings.Repeat("a", 40) {
+				t.Error("configuration was not pinned")
+			}
+			raw, _ := json.Marshal(submission().Spec)
+			payload = map[string]any{"encoding": "base64", "content": base64.StdEncoding.EncodeToString(raw), "size": len(raw)}
+		}
+		data, _ := json.Marshal(payload)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header)}, nil
+	})}
+	s.GitHub = app
+	s.Auth.Repositories["acme/widget"] = auth.Repository{Tenant: "acme", InstallationID: 7}
+	send := func(action, id string, when time.Time) *httptest.ResponseRecorder {
+		payload := map[string]any{"action": action, "installation": map[string]int{"id": 7}, "repository": map[string]string{"full_name": "acme/widget"}, "pull_request": map[string]any{"number": 42, "updated_at": when, "head": map[string]any{"sha": strings.Repeat("a", 40), "repo": map[string]string{"full_name": "acme/widget"}}}}
+		body, _ := json.Marshal(payload)
+		mac := hmac.New(sha256.New, []byte("secret"))
+		mac.Write(body)
+		r := httptest.NewRequest("POST", "/v1/webhooks/github", bytes.NewReader(body))
+		r.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+		r.Header.Set("X-GitHub-Event", "pull_request")
+		r.Header.Set("X-GitHub-Delivery", id)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	now := time.Now().UTC()
+	if w := send("opened", "first", now); w.Code != 202 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := send("opened", "first", now); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := send("closed", "close", now.Add(time.Minute)); w.Code != 202 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := send("opened", "delayed", now); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if len(b.Store.PipelineList("")) != 1 {
+		t.Fatal("duplicate or delayed webhook created another pipeline")
+	}
+}
 
 func fixture() (*Server, *persistence.Memory) {
 	backend := &persistence.Memory{Store: control.New(control.Config{})}

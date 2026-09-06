@@ -1,37 +1,14 @@
-resource "kubernetes_namespace_v1" "control_plane" {
-  metadata {
-    name = var.namespace
-    labels = {
-      "pod-security.kubernetes.io/enforce" = "restricted"
-    }
-  }
-}
-
-resource "kubernetes_secret_v1" "webhook" {
-  metadata {
-    name      = "ci-preview-platform"
-    namespace = kubernetes_namespace_v1.control_plane.metadata[0].name
-  }
-  data = {
-    github-webhook-secret = var.github_webhook_secret
-  }
-}
-
+# Optional chart wrapper. Provision the namespace and ci-secrets externally first.
+# Avoid storing application credentials in Terraform state.
 resource "helm_release" "platform" {
-  name      = "ci-preview-platform"
-  namespace = kubernetes_namespace_v1.control_plane.metadata[0].name
-  chart     = "../../deploy/helm/ci-preview-platform"
-
-  set = [
-    {
-      name  = "image.repository"
-      value = var.image_repository
-    },
-    {
-      name  = "image.tag"
-      value = var.image_tag
-    }
-  ]
-
-  depends_on = [kubernetes_secret_v1.webhook]
+  name      = var.release_name
+  namespace = var.namespace
+  chart     = "${path.module}/../../deploy/helm/ci-preview-platform"
+  wait      = true
+  wait_for_jobs = true
+  timeout   = 600
+  values = [yamlencode({
+    image = var.image
+    existingSecret = var.existing_secret
+  })]
 }

@@ -6,11 +6,15 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Added signed GitHub App delivery integration, object-store signing, authentication, and transactional test-adapter regression coverage; cluster acceptance now also probes Kubernetes API egress isolation.
+- Added complete installation, pipeline, GitHub App, API, security, backup, upgrade, and recovery documentation with a runnable public-repository example.
+- Added manifest and artifact-boundary regression tests and control-plane ingress isolation.
 - Added encrypted PostgreSQL transactions, repository-scoped bearer authentication, immutable YAML plans, GitHub App integration, actual Kubernetes execution, rootless image builds, S3 artifacts, and readiness-driven preview reconciliation.
 - Added the tenant CLI, self-contained Helm installation, and real PostgreSQL and kind acceptance suites. This development candidate is not release-verified yet.
 
 ### Fixed
 
+- Made result metadata and terminal state one locked operation and reject an incorrect state encryption key at startup.
 - Fixed the acceptance runner's installation permissions and aligned benchmark worker trust with the isolated execution policy.
 - Fixed resource leaks from failed parallel branches, bounded lease retries, fenced stale PR events, and removed simulated execution and simulated preview success.
 
