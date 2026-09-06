@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Fixed the acceptance runner's installation permissions and aligned benchmark worker trust with the isolated execution policy.
 - Fixed resource leaks from failed parallel branches, bounded lease retries, fenced stale PR events, and removed simulated execution and simulated preview success.
 
 ### Changed

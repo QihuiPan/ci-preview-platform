@@ -16,7 +16,7 @@ func BenchmarkScheduleAndComplete(b *testing.B) {
 	})
 	_, err := store.RegisterWorker(domain.Worker{
 		ID: "benchmark-worker", Pool: "benchmark", Capacity: b.N + 1,
-		Capabilities: map[string]bool{"linux-amd64": true}, Trusted: true,
+		Capabilities: map[string]bool{"linux-amd64": true},
 	}, now)
 	if err != nil {
 		b.Fatal(err)
