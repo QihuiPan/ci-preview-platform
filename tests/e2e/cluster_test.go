@@ -15,6 +15,7 @@ import (
 
 	"github.com/QihuiPan/ci-preview-platform/internal/control"
 	"github.com/QihuiPan/ci-preview-platform/internal/domain"
+	"github.com/QihuiPan/ci-preview-platform/internal/kube"
 )
 
 func TestRealClusterLifecycle(t *testing.T) {
@@ -131,13 +132,22 @@ func TestRealClusterLifecycle(t *testing.T) {
 	j.Command = []string{"sh", "-c", "echo expected-failure; exit 7"}
 	in.Spec.Jobs["test"] = j
 	json.Unmarshal(call("POST", "/v1/pipelines", "cluster-failure", in, 201), &submitted)
-	waitPipeline(submitted.Pipeline.Pipeline.ID, domain.StateFailed)
+	failed := waitPipeline(submitted.Pipeline.Pipeline.ID, domain.StateFailed)
+	if len(failed.Attempts) != 1 || !strings.Contains(failed.Attempts[0].ResultMessage, "code 7") {
+		t.Fatalf("expected actual command exit 7, not an infrastructure failure: %+v", failed.Attempts)
+	}
 	j.Command = []string{"sh", "-c", "echo waiting; sleep 120"}
 	in.Spec.Jobs["test"] = j
 	json.Unmarshal(call("POST", "/v1/pipelines", "cluster-cancel", in, 201), &submitted)
-	waitPipeline(submitted.Pipeline.Pipeline.ID, domain.StateRunning)
+	running := waitPipeline(submitted.Pipeline.Pipeline.ID, domain.StateRunning)
+	if len(running.Attempts) != 1 {
+		t.Fatal("expected one running attempt before cancellation")
+	}
+	cancelNamespace := kube.JobNamespace(running.Attempts[0].ID)
+	waitKubectl(t, 90*time.Second, func(b []byte) bool { return strings.Contains(string(b), "waiting") }, "logs", "-n", cancelNamespace, "job", "-c", "job")
 	call("POST", "/v1/pipelines/"+submitted.Pipeline.Pipeline.ID+"/cancel", "", map[string]any{}, 200)
 	waitPipeline(submitted.Pipeline.Pipeline.ID, domain.StateCancelled)
+	waitKubectl(t, 90*time.Second, func(b []byte) bool { return len(bytes.TrimSpace(b)) == 0 }, "get", "namespace", cancelNamespace, "--ignore-not-found", "-o", "name")
 	deadline = time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
 		var out struct {
@@ -152,6 +162,23 @@ func TestRealClusterLifecycle(t *testing.T) {
 	}
 	t.Fatal("preview TTL cleanup did not converge")
 }
+
+func waitKubectl(t *testing.T, timeout time.Duration, condition func([]byte) bool, args ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	var last []byte
+	for ctx.Err() == nil {
+		var e error
+		last, e = exec.CommandContext(ctx, "kubectl", append([]string{"--request-timeout=10s"}, args...)...).CombinedOutput()
+		if e == nil && condition(last) {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+	t.Fatalf("kubectl condition did not converge for %v: %s", args, last)
+}
+
 func kubectl(t *testing.T, args ...string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)

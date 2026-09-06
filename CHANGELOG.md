@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Strengthened cluster acceptance to require the exact failing command exit code and confirm a running cancelled container's namespace is actually removed.
 - Added binary-safe CLI artifact downloads with overwrite protection and a cross-platform regression test.
 - Added explicit same-revision reruns while preserving per-request replay safety.
 - Enforced changelog updates for ordinary change commits in CI.
