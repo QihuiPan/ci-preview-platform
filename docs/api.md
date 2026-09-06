@@ -39,6 +39,6 @@ Set API_URL and either API_TOKEN or API_TOKEN_FILE. Build with go build -o bin/c
 - cictl cancel PIPELINE_ID
 - cictl previews
 - cictl logs ATTEMPT_ID
-- cictl artifact ATTEMPT_ID artifacts.tar
+- cictl artifact ATTEMPT_ID artifacts.tar --output artifacts.tar
 
-The CLI writes JSON or requested artifact bytes to stdout and diagnostics to stderr. Protect downloaded artifacts and inspect archives before extraction. Omit --key only for a new logical submission; the generated key is printed to stderr for retries.
+The CLI writes JSON or requested artifact bytes to stdout and diagnostics to stderr. Use --output for binary downloads, especially in Windows PowerShell where shell redirection can change binary data. The output file must not already exist. Protect downloaded artifacts and inspect archives before extraction. Omit --key only for a new logical submission; the generated key is printed to stderr for retries.

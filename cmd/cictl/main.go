@@ -64,7 +64,7 @@ func initialize(args []string) error {
 func run() error {
 	for _, arg := range os.Args[1:] {
 		if arg == "--help" || arg == "-h" || arg == "help" {
-			fmt.Println("cictl 0.2.0\nUsage: cictl init|submit|pipelines|show|cancel|previews|logs|artifact|version\nSubmit: --file CONFIG --repo OWNER/REPO --sha FULL_SHA [--pr NUMBER] [--key ID]\nRead: show PIPELINE_ID, logs ATTEMPT_ID, artifact ATTEMPT_ID NAME\nConfigure API_URL and API_TOKEN or API_TOKEN_FILE for API commands.\nInit prints a new Kubernetes Secret; pipe it directly to kubectl create -f - once.")
+			fmt.Println("cictl 0.2.0\nUsage: cictl init|submit|pipelines|show|cancel|previews|logs|artifact|version\nSubmit: --file CONFIG --repo OWNER/REPO --sha FULL_SHA [--pr NUMBER] [--key ID] [--rerun]\nRead: show PIPELINE_ID, logs ATTEMPT_ID, artifact ATTEMPT_ID NAME [--output FILE]\nConfigure API_URL and API_TOKEN or API_TOKEN_FILE for API commands.\nInit prints a new Kubernetes Secret; pipe it directly to kubectl create -f - once.")
 			return nil
 		}
 	}
@@ -88,6 +88,7 @@ func run() error {
 	var payload any
 	key := ""
 	rawOutput := false
+	outputFile := ""
 	switch mode {
 	case "submit":
 		f := flag.NewFlagSet("submit", flag.ContinueOnError)
@@ -141,8 +142,16 @@ func run() error {
 			path = "/v1/attempts/" + id + "/objects/logs"
 			rawOutput = true
 		case "artifact":
-			if len(os.Args) != 4 || strings.ContainsAny(os.Args[3], "/?") {
+			if len(os.Args) < 4 || strings.ContainsAny(os.Args[3], "/?") {
 				return errors.New("artifact requires an attempt ID and a valid artifact name")
+			}
+			f := flag.NewFlagSet("artifact", flag.ContinueOnError)
+			f.StringVar(&outputFile, "output", "", "Save binary bytes to a new file without shell encoding conversions")
+			if e = f.Parse(os.Args[4:]); e != nil {
+				return e
+			}
+			if f.NArg() != 0 {
+				return errors.New("unexpected artifact arguments")
 			}
 			path = "/v1/attempts/" + id + "/objects/" + os.Args[3]
 			rawOutput = true
@@ -173,6 +182,9 @@ func run() error {
 		return fmt.Errorf("HTTP %d: %s", res.StatusCode, b)
 	}
 	if rawOutput {
+		if outputFile != "" {
+			return saveArtifact(outputFile, res.Body)
+		}
 		_, e = io.Copy(os.Stdout, io.LimitReader(res.Body, 17<<20))
 		return e
 	}
@@ -183,4 +195,27 @@ func run() error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+func saveArtifact(path string, body io.Reader) error {
+	data, e := io.ReadAll(io.LimitReader(body, (16<<20)+1))
+	if e != nil {
+		return e
+	}
+	if len(data) > 16<<20 {
+		return errors.New("artifact exceeds 16 MiB")
+	}
+	f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if e != nil {
+		return e
+	}
+	_, e = f.Write(data)
+	closeErr := f.Close()
+	if e == nil {
+		e = closeErr
+	}
+	if e != nil {
+		os.Remove(path)
+	}
+	return e
 }

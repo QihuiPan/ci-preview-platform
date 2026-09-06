@@ -58,7 +58,7 @@ func (r Runner) Pod(l domain.AttemptLease, authenticated bool) Object {
 	if source == "" {
 		source = l.Pipeline.Repo
 	}
-	env := []Object{{"name": "SOURCE_REPO", "value": source}, {"name": "COMMIT_SHA", "value": l.Pipeline.CommitSHA}, {"name": "HOME", "value": "/tmp"}, {"name": "GIT_TERMINAL_PROMPT", "value": "0"}, {"name": "GIT_CONFIG_GLOBAL", "value": "/tmp/checkout.gitconfig"}}
+	env := []Object{{"name": "SOURCE_REPO", "value": source}, {"name": "COMMIT_SHA", "value": l.Pipeline.CommitSHA}, {"name": "HOME", "value": "/tmp"}, {"name": "GIT_TERMINAL_PROMPT", "value": "0"}, {"name": "GIT_CONFIG_GLOBAL", "value": "/tmp/.gitconfig"}}
 	if authenticated {
 		env = append(env, Object{"name": "GIT_CONFIG_COUNT", "value": "1"}, Object{"name": "GIT_CONFIG_KEY_0", "value": "http.https://github.com/.extraheader"}, Object{"name": "GIT_CONFIG_VALUE_0", "valueFrom": Object{"secretKeyRef": Object{"name": "checkout", "key": "header"}}})
 	}
