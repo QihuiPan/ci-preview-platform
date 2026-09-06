@@ -134,6 +134,7 @@ type worker struct {
 	identity domain.Worker
 	mu       sync.Mutex
 	active   map[string]bool
+	seen     map[string]bool
 	wait     sync.WaitGroup
 }
 
@@ -162,7 +163,7 @@ func run() error {
 		}
 		runner.RegistryConfig = string(b)
 	}
-	w := &worker{client: client, runner: runner, active: map[string]bool{}}
+	w := &worker{client: client, runner: runner, active: map[string]bool{}, seen: map[string]bool{}}
 	if e = client.Do(ctx, "POST", "/v1/workers/register", map[string]any{}, &w.identity); e != nil {
 		return e
 	}
@@ -186,19 +187,39 @@ func run() error {
 				slog.Warn("assignment polling failed", "error", e)
 				continue
 			}
-			for _, l := range out.Assignments {
-				w.mu.Lock()
-				busy := w.active[l.Attempt.ID]
-				if !busy && len(w.active) < w.identity.Capacity {
-					w.active[l.Attempt.ID] = true
-					w.wait.Add(1)
-					go w.execute(ctx, l)
-				}
-				w.mu.Unlock()
+			for _, l := range w.claim(out.Assignments) {
+				w.wait.Add(1)
+				go w.execute(ctx, l)
 			}
 		}
 	}
 }
+
+// Claim each lease once per process. Infrastructure failures must expire instead
+// of immediately restarting and renewing the same attempt without a retry bound.
+func (w *worker) claim(assignments []domain.AttemptLease) []domain.AttemptLease {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	visible := make(map[string]bool, len(assignments))
+	for _, l := range assignments {
+		visible[l.Attempt.ID] = true
+	}
+	for id := range w.seen {
+		if !visible[id] && !w.active[id] {
+			delete(w.seen, id)
+		}
+	}
+	var claimed []domain.AttemptLease
+	for _, l := range assignments {
+		if !w.seen[l.Attempt.ID] && !w.active[l.Attempt.ID] && len(w.active) < w.identity.Capacity {
+			w.seen[l.Attempt.ID] = true
+			w.active[l.Attempt.ID] = true
+			claimed = append(claimed, l)
+		}
+	}
+	return claimed
+}
+
 func (w *worker) execute(parent context.Context, l domain.AttemptLease) {
 	defer w.wait.Done()
 	defer func() { w.mu.Lock(); delete(w.active, l.Attempt.ID); w.mu.Unlock() }()

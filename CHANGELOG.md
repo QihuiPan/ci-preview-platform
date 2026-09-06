@@ -17,6 +17,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Prevented the worker polling loop from reclaiming an abandoned lease and bypassing the bounded infrastructure retry budget; added a regression test.
 - Restricted Git safe-directory configuration to the root-owned workspace mount and surfaced checkout exit reasons and stored logs in acceptance failures.
 - Preserved bounded retries for transient execution infrastructure failures instead of turning them into command failures; rejected untrusted builder leases before creating resources.
 - Updated PostgreSQL to the supported 17.11 maintenance release and refreshed superseded architecture decisions.
