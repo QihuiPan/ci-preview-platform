@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file. The format follows Keep a Changelog, and releases use Semantic Versioning.
 
+## Unreleased
+
+### Changed
+
+- Changed the GitHub repository from private to public on 2026-09-06, enabling public source access and release downloads.
+
 ## 0.2.0 - 2026-09-06
 
 ### Added
