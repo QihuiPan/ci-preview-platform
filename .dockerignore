@@ -12,3 +12,4 @@ coverage
 *.key
 *.out
 *.log
+linux-amd64

@@ -7,7 +7,7 @@ version: 1
 jobs:
   test:
     type: command
-    image: golang:1.26.5-alpine
+    image: golang:1.26.8-alpine
     command: [sh, -ec, "go test ./...; mkdir -p artifacts; go test -json ./... > artifacts/tests.json"]
     resources: {cpu: 1, memory_mb: 1024}
     timeout_seconds: 900
@@ -30,7 +30,7 @@ Enable a trusted repository with an `image_prefix` such as `ghcr.io/my-team` in 
 version: 1
 jobs:
   test:
-    image: golang:1.26.5-alpine
+    image: golang:1.26.8-alpine
     command: [go, test, ./...]
     resources: {cpu: 1, memory_mb: 1024}
   image:
@@ -52,6 +52,8 @@ jobs:
 The trusted builder publishes an immutable digest, requests BuildKit SBOM and provenance attestations, and stores build metadata. A preview without an explicit image uses that digest, never the mutable tag. The registry must support OCI artifacts and be reachable over public HTTPS under the default network policy. SBOM generation may download the scanner image.
 
 Rootless BuildKit requires a seccomp/AppArmor exception and `--oci-worker-no-process-sandbox`; only its dedicated trusted namespace relaxes Pod Security admission. This is not a sandbox for hostile users. Forks must never use that pool. Registry credentials appear only in the builder container, not checkout, ordinary command jobs, or the artifact helper.
+
+The rootless namespace also permits the SETUID/SETGID helper capabilities and setuid privilege transition needed for user-namespace mapping. Nodes must allow unprivileged user namespaces. Some Ubuntu/AppArmor configurations block this; configure dedicated builder nodes according to the upstream BuildKit rootless guide rather than disabling host protections across a shared cluster.
 
 For a private output image, set `controller.imagePullSecret` to an existing registry Secret in `ci-platform`. The controller copies it into previews and references it from the pod.
 

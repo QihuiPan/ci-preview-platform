@@ -17,7 +17,7 @@ The 0.2 runtime replaces the original simulator. PostgreSQL persists scheduling 
 - [Security boundaries](docs/threat-model.md) and [supported scope](docs/known-limitations.md)
 - [Verification results](docs/test-report.md) and [changelog](CHANGELOG.md)
 
-You need a dedicated Linux Kubernetes cluster with an enforcing NetworkPolicy CNI, persistent storage, Go 1.26.5, Docker, kubectl, and Helm 3.18+. The control plane is not a hosted service: you supply your cluster, image registry, and optional public DNS/TLS. No cloud account or paid service is created by the installer.
+You need a dedicated Linux Kubernetes cluster with an enforcing NetworkPolicy CNI, persistent storage, Go 1.26.8, Docker, kubectl, and Helm 3.18+. The control plane is not a hosted service: you supply your cluster, image registry, and optional public DNS/TLS. No cloud account or paid service is created by the installer.
 
 For a disposable local demonstration, use the kind instructions in the installation guide. For an existing suitable cluster:
 

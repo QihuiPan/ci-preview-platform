@@ -137,7 +137,8 @@ spec:
               mc alias set local http://{{ .Release.Name }}-minio:9000 "$S3_USER" "$S3_PASSWORD";
               mc mb --ignore-existing local/{{ .Values.minio.bucket }};
               mc anonymous set none local/{{ .Values.minio.bucket }};
-              mc ilm rule add --id expire-artifacts --expire-days {{ .Values.minio.retentionDays }} --prefix attempts/ local/{{ .Values.minio.bucket }} || mc ilm rule edit --id expire-artifacts --expire-days {{ .Values.minio.retentionDays }} local/{{ .Values.minio.bucket }}
+              mc ilm import local/{{ .Values.minio.bucket }} < /configuration/lifecycle.json
+          volumeMounts: [{name: configuration, mountPath: /configuration, readOnly: true}]
           env:
             - name: S3_USER
               valueFrom:
@@ -145,3 +146,13 @@ spec:
             - name: S3_PASSWORD
               valueFrom:
                 secretKeyRef: {name: {{ .Values.existingSecret }}, key: s3-secret-key}
+      volumes:
+        - name: configuration
+          configMap: {name: {{ .Release.Name }}-lifecycle}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: {{ .Release.Name }}-lifecycle}
+data:
+  lifecycle.json: |
+    {"Rules":[{"ID":"expire-artifacts","Status":"Enabled","Filter":{"Prefix":"attempts/"},"Expiration":{"Days":{{ .Values.minio.retentionDays }}}}]}

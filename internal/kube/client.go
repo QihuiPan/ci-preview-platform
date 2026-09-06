@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -38,6 +40,34 @@ func (c Client) Run(ctx context.Context, input []byte, args ...string) ([]byte, 
 		binary = "kubectl"
 	}
 	args = append([]string{"--request-timeout=30s"}, args...)
+	if host := os.Getenv("KUBERNETES_SERVICE_HOST"); host != "" {
+		const token = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+		if _, e := os.Stat(token); e != nil {
+			return nil, errors.New("Kubernetes ServiceAccount token is not mounted")
+		}
+		port := os.Getenv("KUBERNETES_SERVICE_PORT")
+		if port == "" {
+			port = "443"
+		}
+		config := Object{"apiVersion": "v1", "kind": "Config", "clusters": []Object{{"name": "cluster", "cluster": Object{"server": "https://" + net.JoinHostPort(host, port), "certificate-authority": "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"}}}, "users": []Object{{"name": "manager", "user": Object{"tokenFile": token}}}, "contexts": []Object{{"name": "manager", "context": Object{"cluster": "cluster", "user": "manager"}}}, "current-context": "manager"}
+		data, e := json.Marshal(config)
+		if e != nil {
+			return nil, e
+		}
+		file, e := os.CreateTemp("", "ci-kubeconfig-*")
+		if e != nil {
+			return nil, e
+		}
+		defer os.Remove(file.Name())
+		if _, e = file.Write(data); e != nil {
+			file.Close()
+			return nil, e
+		}
+		if e = file.Close(); e != nil {
+			return nil, e
+		}
+		args = append([]string{"--kubeconfig", file.Name()}, args...)
+	}
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Stdin = bytes.NewReader(input)
 	out := &bounded{limit: 17 << 20}

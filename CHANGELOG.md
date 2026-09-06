@@ -14,6 +14,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Fixed clean-cluster installation by explicitly loading projected ServiceAccount credentials and importing a declarative MinIO lifecycle configuration instead of unsupported CLI flags.
+- Updated the Go toolchain to 1.26.8 and the text dependency to its security-patched version; added a reachable-vulnerability CI gate.
+- Restricted the trusted rootless builder's setuid-helper exception to SETUID/SETGID, leaving ordinary and fork job profiles unchanged.
 - Made result metadata and terminal state one locked operation and reject an incorrect state encryption key at startup.
 - Fixed the acceptance runner's installation permissions and aligned benchmark worker trust with the isolated execution policy.
 - Fixed resource leaks from failed parallel branches, bounded lease retries, fenced stale PR events, and removed simulated execution and simulated preview success.

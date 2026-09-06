@@ -1,6 +1,6 @@
 # Contributing
 
-Use Go 1.26.5. Run gofmt, go vet ./..., and go test ./... before submitting a change. Linux CI also runs race detection and real PostgreSQL tests; cluster acceptance uses a disposable kind cluster with enforcing Calico policies.
+Use Go 1.26.8. Run gofmt, go vet ./..., and go test ./... before submitting a change. Linux CI also runs race detection and real PostgreSQL tests; cluster acceptance uses a disposable kind cluster with enforcing Calico policies.
 
 Every change commit must include an English CHANGELOG.md entry explaining added behavior, changed compatibility or fixed defects. All code comments, annotations, examples and documentation must be English.
 

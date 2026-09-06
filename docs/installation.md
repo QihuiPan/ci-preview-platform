@@ -10,7 +10,7 @@ The chart starts PostgreSQL and MinIO with persistent volumes; these single-inst
 
 ## Disposable kind installation
 
-Install Docker, Go 1.26.5, kubectl, Helm 3.18+, and kind 0.30+. Docker must be running in Linux-container mode. On Windows, use WSL2 with Docker integration or a remote Linux cluster.
+Install Docker, Go 1.26.8, kubectl, Helm 3.18+, and kind 0.30+. Docker must be running in Linux-container mode. On Windows, use WSL2 with Docker integration or a remote Linux cluster.
 
 ```bash
 kind create cluster --name ci-preview-test --image kindest/node:v1.34.0 --config deploy/kind.yaml

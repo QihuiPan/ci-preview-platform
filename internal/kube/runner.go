@@ -67,6 +67,8 @@ func (r Runner) Pod(l domain.AttemptLease, authenticated bool) Object {
 		job["command"] = []string{"buildctl-daemonless.sh", "build", "--frontend", "dockerfile.v0", "--local", "context=" + path.Join("/workspace", b.Context), "--local", "dockerfile=" + path.Dir(path.Join("/workspace", b.Dockerfile)), "--opt", "filename=" + path.Base(b.Dockerfile), "--opt", "attest:sbom=", "--opt", "attest:provenance=mode=max", "--output", "type=image,name=" + b.Destination + ",push=true", "--metadata-file", "/workspace/.ci-build-metadata.json"}
 		security := Security()
 		security["readOnlyRootFilesystem"] = false
+		security["allowPrivilegeEscalation"] = true
+		security["capabilities"] = Object{"drop": []string{"ALL"}, "add": []string{"SETUID", "SETGID"}}
 		security["seccompProfile"] = Object{"type": "Unconfined"}
 		security["appArmorProfile"] = Object{"type": "Unconfined"}
 		job["securityContext"] = security
