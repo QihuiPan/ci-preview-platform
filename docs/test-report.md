@@ -58,11 +58,15 @@ The processes were stopped after verification.
 
 ## Race detector
 
-The local portable Windows toolchain does not include a C compiler, so `go test -race` cannot run in this environment. `.github/workflows/ci.yml` makes the Linux race-enabled suite a required implementation check on every push and pull request. A passing GitHub Actions run is therefore the release gate for race instrumentation.
+The local portable Windows toolchain does not include a C compiler, so `go test -race` cannot run in this environment. The Linux race-enabled suite passed in [GitHub Actions run 34025108528](https://github.com/QihuiPan/ci-preview-platform/actions/runs/34025108528). The run also passed formatting, static analysis, normal compilation, and command builds.
 
 ## Container verification
 
-The local Docker Desktop backend could not start because its host-owned socket was locked, so no local container build result is claimed. The Docker process started for the check was shut down without changing its data. The GitHub Actions release gate validates the Compose model and builds the control-plane image on Linux.
+The local Docker Desktop backend could not start because its host-owned socket was locked, so no local container build result is claimed. The Docker process started for the check was shut down without changing its data. GitHub Actions run 34025108528 successfully validated the Compose model and built the control-plane image on Linux.
+
+## Remote release gate
+
+GitHub Actions run 34025108528 completed successfully in 2 minutes 7 seconds. Every configured step passed: checkout, Go setup, formatting, static analysis, race-enabled tests, command builds, Compose validation, and the control-plane container build.
 
 ## Benchmark
 

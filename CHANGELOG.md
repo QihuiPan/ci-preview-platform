@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Changed
 
-- No unreleased changes.
+- Recorded the successful Linux race, build, Compose validation, and container build release gate for version 0.1.0.
 
 ## 0.1.0 - 2026-09-06
 
