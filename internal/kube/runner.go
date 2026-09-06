@@ -19,6 +19,9 @@ type Runner struct {
 }
 
 func (r Runner) Prepare(ctx context.Context, l domain.AttemptLease, token string) error {
+	if l.Job.Spec.Buildkit != nil && !l.Job.Spec.Trusted {
+		return errors.New("untrusted image publishing is forbidden")
+	}
 	ns := JobNamespace(l.Attempt.ID)
 	owner := l.Attempt.ID
 	if _, e := r.Client.OwnedNamespace(ctx, ns, owner); e != nil {

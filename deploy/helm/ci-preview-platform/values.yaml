@@ -19,7 +19,7 @@ github:
   appID: ""
   keySecret: ""
 postgres:
-  image: postgres:17.6-alpine
+  image: postgres:17.11-alpine
   storage: 10Gi
 minio:
   image: ci-preview-minio:2025-10-15

@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Added explicit same-revision reruns while preserving per-request replay safety.
 - Enforced changelog updates for ordinary change commits in CI.
 - Added standalone CLI help and version commands for first-time users.
 - Added signed GitHub App delivery integration, object-store signing, authentication, and transactional test-adapter regression coverage; cluster acceptance now also probes Kubernetes API egress isolation.
@@ -16,6 +17,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Preserved bounded retries for transient execution infrastructure failures instead of turning them into command failures; rejected untrusted builder leases before creating resources.
+- Updated PostgreSQL to the supported 17.11 maintenance release and refreshed superseded architecture decisions.
 - Sized the disposable acceptance cluster with two schedulable nodes after real resource requests exposed insufficient capacity on a single small CI node.
 - Rejected nonportable artifact paths, verified object hashes on download, and made the restart acceptance probe tolerate the expected port-forward reconnection.
 - Replaced the vulnerable prebuilt MinIO server default with a reproducible build of the upstream security-fixed source revision, and refreshed the BuildKit, kubectl, and MinIO client versions.

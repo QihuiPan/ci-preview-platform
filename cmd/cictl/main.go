@@ -96,6 +96,7 @@ func run() error {
 		sha := f.String("sha", "", "Immutable 40-character commit SHA")
 		pr := f.Int("pr", 0, "Pull request number for previews")
 		requestID := f.String("key", "", "Stable retry idempotency key")
+		rerun := f.Bool("rerun", false, "Create a new logical pipeline for an already built revision")
 		if e = f.Parse(os.Args[2:]); e != nil {
 			return e
 		}
@@ -115,7 +116,7 @@ func run() error {
 			key = random()
 			fmt.Fprintln(os.Stderr, "Idempotency key:", key)
 		}
-		payload = control.Submission{Repo: *repo, CommitSHA: *sha, PRNumber: *pr, Spec: spec}
+		payload = control.Submission{Repo: *repo, CommitSHA: *sha, PRNumber: *pr, Spec: spec, Rerun: *rerun}
 		method = "POST"
 		path = "/v1/pipelines"
 	case "pipelines":

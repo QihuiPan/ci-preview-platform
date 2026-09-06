@@ -33,6 +33,7 @@ Supported object names: logs, artifacts.tar, build-metadata.json, provenance.jso
 Set API_URL and either API_TOKEN or API_TOKEN_FILE. Build with go build -o bin/cictl ./cmd/cictl.
 
 - cictl submit --file CONFIG --repo OWNER/REPO --sha FULL_SHA --key STABLE_ID [--pr NUMBER]
+- Add --rerun and a new key only when intentionally starting a new run of an existing revision.
 - cictl pipelines
 - cictl show PIPELINE_ID
 - cictl cancel PIPELINE_ID

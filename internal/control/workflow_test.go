@@ -51,6 +51,26 @@ func TestSnapshotPreservesLeaseAndPRClock(t *testing.T) {
 		t.Fatal("late event resurrected a closed PR", e, out)
 	}
 }
+
+func TestExplicitRerunRetainsRequestIdempotency(t *testing.T) {
+	s := newTestStore()
+	now := time.Now()
+	in := Submission{RequestID: "original", Repo: "r/r", Tenant: "t", CommitSHA: "a", Spec: singleJobSpec()}
+	first, _, e := s.Submit(in, now)
+	if e != nil {
+		t.Fatal(e)
+	}
+	in.RequestID = "rerun"
+	in.Rerun = true
+	second, duplicate, e := s.Submit(in, now.Add(time.Second))
+	if e != nil || duplicate || first.Pipeline.ID == second.Pipeline.ID {
+		t.Fatal("explicit rerun was deduplicated", e)
+	}
+	again, duplicate, e := s.Submit(in, now.Add(2*time.Second))
+	if e != nil || !duplicate || again.Pipeline.ID != second.Pipeline.ID {
+		t.Fatal("rerun request replay created new work", e)
+	}
+}
 func TestFailureReleasesParallelSlots(t *testing.T) {
 	s := newTestStore()
 	now := time.Now()

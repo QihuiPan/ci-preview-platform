@@ -10,7 +10,7 @@ A pull request can close while its final build attempt is completing. If complet
 
 ## Decision
 
-The close event first records a `DELETING` preview tombstone, then cancels active work. Preview activation checks for the tombstone and cannot replace it. Reconciliation removes the record only after a grace period; a production controller must wait until exposure and owned resources are absent.
+The close event records a durable PR clock and closed generation, cancels active work, and marks any preview DELETING. Preview activation checks the PR generation. The controller reports deletion only once the namespace is absent; the PR clock survives resource cleanup to reject later delivery of an older event.
 
 ## Consequences
 

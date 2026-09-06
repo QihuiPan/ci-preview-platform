@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 10
     services:
       postgres:
-        image: postgres:17.6-alpine
+        image: postgres:17.11-alpine
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: integration-only

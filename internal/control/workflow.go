@@ -33,6 +33,7 @@ type Submission struct {
 	Trigger        string              `json:"trigger"`
 	PRNumber       int                 `json:"pr_number"`
 	Fork           bool                `json:"fork"`
+	Rerun          bool                `json:"rerun,omitempty"`
 	Closed         bool                `json:"closed"`
 	EventTime      time.Time           `json:"event_time"`
 	InstallationID int64               `json:"installation_id"`
@@ -83,9 +84,9 @@ func (s *Store) Submit(input Submission, now time.Time) (domain.PipelineView, bo
 	configJSON, _ := json.Marshal(input.Spec)
 	configSHA := sha256.Sum256(configJSON)
 	configHash := hex.EncodeToString(configSHA[:])
-	if !input.Closed && !previous.Closed {
+	if !input.Closed && !previous.Closed && !input.Rerun {
 		for _, p := range s.pipelines {
-			if p.Tenant == input.Tenant && p.Repo == input.Repo && p.PRNumber == input.PRNumber && p.CommitSHA == input.CommitSHA && p.ConfigDigest == configHash && p.Generation == previous.Generation {
+			if p.Tenant == input.Tenant && p.Repo == input.Repo && p.SourceRepo == input.SourceRepo && p.PRNumber == input.PRNumber && p.CommitSHA == input.CommitSHA && p.ConfigDigest == configHash && p.Generation == previous.Generation {
 				s.deliveries[input.RequestID] = p.ID
 				s.requestHashes[input.RequestID] = hash
 				if input.PRNumber > 0 {
@@ -121,7 +122,7 @@ func (s *Store) Submit(input Submission, now time.Time) (domain.PipelineView, bo
 	}
 	// Deliveries for the same immutable revision and configuration share one logical pipeline.
 	for _, p := range s.pipelines {
-		if p.Tenant == input.Tenant && p.Repo == input.Repo && p.PRNumber == input.PRNumber && p.CommitSHA == input.CommitSHA && p.ConfigDigest == configHash && p.Generation == previous.Generation {
+		if !input.Rerun && p.Tenant == input.Tenant && p.Repo == input.Repo && p.SourceRepo == input.SourceRepo && p.PRNumber == input.PRNumber && p.CommitSHA == input.CommitSHA && p.ConfigDigest == configHash && p.Generation == previous.Generation {
 			s.deliveries[input.RequestID] = p.ID
 			return s.pipelineViewLocked(p.ID), true, nil
 		}

@@ -10,8 +10,8 @@ Fork pull requests contain untrusted code and must not inherit repository deploy
 
 ## Decision
 
-Jobs declare whether trusted execution is required, and workers advertise their trust pool and capabilities. The scheduler checks both before issuing a lease. Fork-generated default plans do not request protected trust. A production deployment must also isolate node pools, identities, networks, secrets, and object-store prefixes.
+The operator repository policy determines trust, and the authenticated worker principal determines its pool, capabilities and capacity. The scheduler requires an exact trust match before issuing a lease. Forks are always untrusted and cannot publish images. A production deployment must also isolate node pools, identities, networks, secrets, and object-store prefixes.
 
 ## Consequences
 
-Trust becomes part of scheduling eligibility and is visible in tests. The version 0.1.0 worker registration endpoint is unauthenticated, so its trust claim is suitable only for local development until workload identity is added.
+Trust is part of scheduling eligibility and is visible in tests. Version 0.2 removes unauthenticated registration and ignores caller-provided trust. Management bearer tokens remain operator secrets; workload mTLS and attested worker identities are outside this release.

@@ -2,7 +2,7 @@
 # These credentials are intentionally local-only and must not be used in production.
 services:
   postgres:
-    image: postgres:17.6-alpine
+    image: postgres:17.11-alpine
     environment:
       POSTGRES_DB: ci
       POSTGRES_USER: ci

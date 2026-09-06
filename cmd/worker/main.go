@@ -249,9 +249,8 @@ func (w *worker) execute(parent context.Context, l domain.AttemptLease) {
 		return
 	}
 	if err != nil {
-		result.Success = false
-		result.Message = "Execution infrastructure error; inspect worker logs"
-		slog.Warn("execution failed", "attempt", l.Attempt.ID, "error", err)
+		slog.Warn("execution infrastructure failed; lease will expire and retry within its budget", "attempt", l.Attempt.ID, "error", err)
+		return
 	}
 	if result.Digest != "" && !planner.DigestPattern.MatchString(result.Digest) {
 		result.Success = false

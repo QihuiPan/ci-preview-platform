@@ -53,3 +53,12 @@ func TestContentAddressedAuthenticatedRoundTrip(t *testing.T) {
 		t.Fatal("unsafe object key accepted")
 	}
 }
+
+func TestRejectsCorruptObjectContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("tampered")) }))
+	defer server.Close()
+	s := &S3{Endpoint: server.URL, Bucket: "artifacts", AccessKey: "access", SecretKey: "secret", Region: "us-east-1"}
+	if _, e := s.Get(context.Background(), "attempts/a/logs/"+hash([]byte("original"))); e == nil {
+		t.Fatal("corrupt object passed integrity verification")
+	}
+}

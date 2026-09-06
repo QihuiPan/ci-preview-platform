@@ -22,6 +22,8 @@ Limits: at most 32 jobs, 1-8 CPUs and 64-16384 MiB per job, 10-3600 seconds, 1-5
 
 The `trusted` field is not an authorization mechanism. The API overwrites it using the operator repository policy. Fork jobs are always untrusted and cannot publish images.
 
+To intentionally rebuild an already submitted revision after fixing infrastructure, use `cictl submit --rerun` with a new idempotency key. Retrying a lost HTTP response must instead use the same key and body; it must not create another logical run.
+
 ## Image builds
 
 Enable a trusted repository with an `image_prefix` such as `ghcr.io/my-team` in the auth configuration. Add a separate trusted worker principal with the `buildkit-rootless` capability and a unique token/ID. Add that worker to Helm's `workers` list. Store Docker registry credentials in a Kubernetes `kubernetes.io/dockerconfigjson` Secret and reference its name as that worker's `registrySecret`.
