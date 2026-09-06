@@ -98,6 +98,12 @@ func (s *S3) Get(ctx context.Context, key string) ([]byte, error) {
 	if len(b) > 16<<20 {
 		return nil, errors.New("object exceeds 16 MiB")
 	}
+	if e == nil {
+		parts := strings.Split(key, "/")
+		if hash(b) != parts[len(parts)-1] {
+			return nil, errors.New("object content digest does not match its immutable key")
+		}
+	}
 	return b, e
 }
 func (s *S3) Ping(ctx context.Context) error {

@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/QihuiPan/ci-preview-platform/internal/cache"
 	"github.com/QihuiPan/ci-preview-platform/internal/domain"
 	"github.com/QihuiPan/ci-preview-platform/internal/kube"
 	"github.com/QihuiPan/ci-preview-platform/internal/planner"
@@ -104,6 +105,12 @@ func archive(root string, dest io.Writer) error {
 			return e
 		}
 		header.Name = filepath.ToSlash(name)
+		if strings.Contains(header.Name, "\\") {
+			return errors.New("artifact names must be portable across operating systems")
+		}
+		if e = cache.ValidateArchiveEntry(header.Name, info.Size(), 16<<20); e != nil {
+			return e
+		}
 		header.Uid = 0
 		header.Gid = 0
 		header.Uname = ""

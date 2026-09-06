@@ -17,6 +17,7 @@ kind create cluster --name ci-preview-test --image kindest/node:v1.34.0 --config
 kubectl apply --server-side -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.2/manifests/calico.yaml
 kubectl wait --for=condition=Ready nodes --all --timeout=300s
 kubectl rollout status daemonset/calico-node -n kube-system --timeout=300s
+kubectl taint nodes ci-preview-test-control-plane node-role.kubernetes.io/control-plane:NoSchedule-
 ```
 
 Run the complete disposable acceptance scenario:

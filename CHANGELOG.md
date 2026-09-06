@@ -16,6 +16,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Sized the disposable acceptance cluster with two schedulable nodes after real resource requests exposed insufficient capacity on a single small CI node.
+- Rejected nonportable artifact paths, verified object hashes on download, and made the restart acceptance probe tolerate the expected port-forward reconnection.
 - Replaced the vulnerable prebuilt MinIO server default with a reproducible build of the upstream security-fixed source revision, and refreshed the BuildKit, kubectl, and MinIO client versions.
 - Fixed clean-cluster installation by explicitly loading projected ServiceAccount credentials and importing a declarative MinIO lifecycle configuration instead of unsupported CLI flags.
 - Updated the Go toolchain to 1.26.8 and the text dependency to its security-patched version; added a reachable-vulnerability CI gate.
