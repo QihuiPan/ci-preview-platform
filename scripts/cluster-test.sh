@@ -19,7 +19,7 @@ E2E_PREVIEW_IMAGE=$(docker image inspect nginxinc/nginx-unprivileged:1.27-alpine
 export E2E_API_TOKEN
 E2E_API_TOKEN=$(kubectl get secret ci-secrets -n ci-platform -o jsonpath='{.data.admin-token}' | base64 --decode)
 export E2E_API_URL=http://127.0.0.1:18080
-(while true; do kubectl port-forward -n ci-platform service/ci-api 18080:8080; sleep 1; done) > /tmp/ci-port-forward.log 2>&1 &
+(while true; do kubectl port-forward -n ci-platform service/ci-api 18080:8080 || true; sleep 1; done) > /tmp/ci-port-forward.log 2>&1 &
 forward_pid=$!
 trap 'pkill -P "$forward_pid" 2>/dev/null || true; kill "$forward_pid" 2>/dev/null || true' EXIT
 for _ in $(seq 1 60); do

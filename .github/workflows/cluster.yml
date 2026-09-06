@@ -38,6 +38,7 @@ jobs:
             kubectl logs -n ci-platform deployment/$app --tail=20 || true
           done
           kubectl logs -n ci-platform -l job-name=ci-bucket-1 --tail=40 || true
+          tail -20 /tmp/ci-port-forward.log || true
       - name: Remove disposable cluster
         if: always()
         run: kind delete cluster --name ci-preview-test

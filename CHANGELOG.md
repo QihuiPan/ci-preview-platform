@@ -19,6 +19,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Kept the acceptance port-forward reconnect loop alive under Bash errexit when the API pod is deliberately restarted; real execution, stored artifacts, and preview HTTP had already passed before that harness failure.
 - Directed Go and XDG caches into the writable per-attempt temporary volume so the documented Go job works with a read-only root filesystem.
 - Corrected the example repository's immutable commit SHA against both Git and the GitHub API, and added an early fixture-availability check before cluster image builds.
 - Added the patched object-store image input to the optional Terraform wrapper and documented explicit cluster authentication and ownership constraints.
