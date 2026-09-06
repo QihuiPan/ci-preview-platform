@@ -24,6 +24,9 @@ func TestUntrustedPodHasNoManagementCredentials(t *testing.T) {
 	if !strings.Contains(string(raw), `"readOnlyRootFilesystem":true`) {
 		t.Fatal("root filesystem is writable")
 	}
+	if !strings.Contains(string(raw), "safe.directory /workspace") || strings.Contains(string(raw), "safe.directory *") {
+		t.Fatal("checkout must trust only its group-writable workspace mount")
+	}
 }
 func TestPreviewUsesReadinessAndPinnedImage(t *testing.T) {
 	c := PreviewController{Domain: "preview.example", IngressClass: "nginx"}

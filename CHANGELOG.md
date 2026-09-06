@@ -17,6 +17,7 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- Restricted Git safe-directory configuration to the root-owned workspace mount and surfaced checkout exit reasons and stored logs in acceptance failures.
 - Preserved bounded retries for transient execution infrastructure failures instead of turning them into command failures; rejected untrusted builder leases before creating resources.
 - Updated PostgreSQL to the supported 17.11 maintenance release and refreshed superseded architecture decisions.
 - Sized the disposable acceptance cluster with two schedulable nodes after real resource requests exposed insufficient capacity on a single small CI node.

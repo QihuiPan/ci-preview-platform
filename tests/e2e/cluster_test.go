@@ -64,6 +64,11 @@ func TestRealClusterLifecycle(t *testing.T) {
 				return v
 			}
 			if v.Pipeline.Status == domain.StateFailed && wanted != domain.StateFailed {
+				for _, a := range v.Attempts {
+					if a.LogKey != "" {
+						t.Logf("Attempt %s logs: %s", a.ID, call("GET", "/v1/attempts/"+a.ID+"/objects/logs", "", nil, 200))
+					}
+				}
 				t.Fatalf("pipeline failed: %+v", v)
 			}
 			time.Sleep(2 * time.Second)

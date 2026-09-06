@@ -58,12 +58,13 @@ func (r Runner) Pod(l domain.AttemptLease, authenticated bool) Object {
 	if source == "" {
 		source = l.Pipeline.Repo
 	}
-	env := []Object{{"name": "SOURCE_REPO", "value": source}, {"name": "COMMIT_SHA", "value": l.Pipeline.CommitSHA}, {"name": "HOME", "value": "/tmp"}, {"name": "GIT_TERMINAL_PROMPT", "value": "0"}}
+	env := []Object{{"name": "SOURCE_REPO", "value": source}, {"name": "COMMIT_SHA", "value": l.Pipeline.CommitSHA}, {"name": "HOME", "value": "/tmp"}, {"name": "GIT_TERMINAL_PROMPT", "value": "0"}, {"name": "GIT_CONFIG_GLOBAL", "value": "/tmp/checkout.gitconfig"}}
 	if authenticated {
 		env = append(env, Object{"name": "GIT_CONFIG_COUNT", "value": "1"}, Object{"name": "GIT_CONFIG_KEY_0", "value": "http.https://github.com/.extraheader"}, Object{"name": "GIT_CONFIG_VALUE_0", "valueFrom": Object{"secretKeyRef": Object{"name": "checkout", "key": "header"}}})
 	}
 	small := Object{"requests": Object{"cpu": "100m", "memory": "64Mi", "ephemeral-storage": "64Mi"}, "limits": Object{"cpu": "250m", "memory": "128Mi", "ephemeral-storage": "256Mi"}}
-	init := Object{"name": "checkout", "image": r.GitImage, "command": []string{"/bin/sh", "-ec", `git init /workspace; cd /workspace; git remote add origin "https://github.com/${SOURCE_REPO}.git"; git fetch --depth=1 origin "$COMMIT_SHA"; git checkout --detach FETCH_HEAD; test "$(git rev-parse HEAD)" = "$COMMIT_SHA"`}, "env": env, "volumeMounts": mounts, "securityContext": Security(), "resources": small}
+	// The emptyDir mount is root-owned with an fsGroup; trust only this exact worktree.
+	init := Object{"name": "checkout", "image": r.GitImage, "command": []string{"/bin/sh", "-ec", `git config --global --add safe.directory /workspace; git init /workspace; cd /workspace; git remote add origin "https://github.com/${SOURCE_REPO}.git"; git fetch --depth=1 origin "$COMMIT_SHA"; git checkout --detach FETCH_HEAD; test "$(git rev-parse HEAD)" = "$COMMIT_SHA"`}, "env": env, "volumeMounts": mounts, "securityContext": Security(), "resources": small}
 	job := Object{"name": "job", "image": spec.Image, "command": spec.Command, "workingDir": "/workspace", "volumeMounts": mounts, "env": []Object{{"name": "HOME", "value": "/tmp"}, {"name": "CI", "value": "true"}}, "securityContext": Security(), "resources": Object{"requests": Object{"cpu": strconv.Itoa(spec.Resources.CPU), "memory": fmt.Sprintf("%dMi", spec.Resources.Memory), "ephemeral-storage": "1Gi"}, "limits": Object{"cpu": strconv.Itoa(spec.Resources.CPU), "memory": fmt.Sprintf("%dMi", spec.Resources.Memory), "ephemeral-storage": "10Gi"}}}
 	if b := spec.Buildkit; b != nil {
 		job["image"] = r.BuildkitImage
@@ -117,9 +118,10 @@ func (r Runner) Execute(ctx context.Context, l domain.AttemptLease, token string
 			raw, _ := json.Marshal(v)
 			var pod struct {
 				Status struct {
-					Phase             string `json:"phase"`
-					Reason            string `json:"reason"`
-					ContainerStatuses []struct {
+					Phase                 string            `json:"phase"`
+					Reason                string            `json:"reason"`
+					InitContainerStatuses []containerStatus `json:"initContainerStatuses"`
+					ContainerStatuses     []struct {
 						Name  string `json:"name"`
 						State struct {
 							Terminated *struct {
@@ -135,6 +137,12 @@ func (r Runner) Execute(ctx context.Context, l domain.AttemptLease, token string
 			}
 			done := pod.Status.Phase == "Failed"
 			result.Message = pod.Status.Reason
+			for _, c := range pod.Status.InitContainerStatuses {
+				if c.State.Terminated != nil && c.State.Terminated.ExitCode != 0 {
+					done = true
+					result.Message = fmt.Sprintf("Checkout exited with code %d (%s)", c.State.Terminated.ExitCode, c.State.Terminated.Reason)
+				}
+			}
 			for _, c := range pod.Status.ContainerStatuses {
 				if c.Name == "job" && c.State.Terminated != nil {
 					done = true
@@ -177,4 +185,14 @@ func (r Runner) Execute(ctx context.Context, l domain.AttemptLease, token string
 			return result, nil
 		}
 	}
+}
+
+type containerStatus struct {
+	Name  string `json:"name"`
+	State struct {
+		Terminated *struct {
+			ExitCode int    `json:"exitCode"`
+			Reason   string `json:"reason"`
+		} `json:"terminated"`
+	} `json:"state"`
 }
